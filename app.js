@@ -76,6 +76,8 @@ const strategy = new OIDCStrategy({
     scope:          ['openid','profile','offline_access'],
     validateIssuer: false
   },
+    /* … callback … */
+    console.log('Redirect URI sent to B2C =>', azureStrategy._config.redirectUrl);
   async (iss, sub, profile, accessToken, refreshToken, done) => {
     try {
       // 1) Upsert the user
