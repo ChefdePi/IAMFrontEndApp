@@ -79,17 +79,20 @@ function needPerm(permName) {
 // ─── Azure AD B2C Strategy ─────────────────────────────────────────────────
 const azureStrategy = new OIDCStrategy(
   {
-    identityMetadata:        `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
-                             `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
-                             `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
-    clientID:                process.env.AZURE_AD_B2C_CLIENT_ID,
-    clientSecret:            process.env.AZURE_AD_B2C_CLIENT_SECRET,
-    redirectUrl:             redirectUri,
+    identityMetadata:
+      `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
+      `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
+      `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
+    // explicit issuer from your discovery document
+    issuer: 'https://eld3rsecb2c.b2clogin.com/6f61f7c7-e051-4385-bae7-793d6e46047b/v2.0/',
+    clientID:       process.env.AZURE_AD_B2C_CLIENT_ID,
+    clientSecret:   process.env.AZURE_AD_B2C_CLIENT_SECRET,
+    redirectUrl:    redirectUri,
     allowHttpForRedirectUrl: process.env.PUBLIC_HOST.startsWith('http://'),
-    responseType:            'code',
-    responseMode:            'query',
-    scope:                   ['openid','profile','offline_access'],
-    validateIssuer:          false
+    responseType:   'code',
+    responseMode:   'query',
+    scope:          ['openid','profile','offline_access'],
+    validateIssuer: true
   },
   async (iss, sub, profile, accessToken, refreshToken, done) => {
     try {
@@ -99,8 +102,7 @@ const azureStrategy = new OIDCStrategy(
       await pool.execute(
         `INSERT INTO users (Username, Email)
            VALUES (?, ?)
-           ON DUPLICATE KEY UPDATE
-             Username = VALUES(Username)`,
+           ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
         [name, email]
       );
 
@@ -193,7 +195,7 @@ app.get('/dashboard', needPerm('ViewDashboard'), (req, res) =>
   res.send('<h2>Dashboard Data…</h2>')
 );
 
-// Example POST-only route
+// Example POST‑only route
 app.post('/tasks/update', needPerm('UpdateCareTasks'), (req, res) =>
   res.json({ success: true })
 );
