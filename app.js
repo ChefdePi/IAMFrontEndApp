@@ -1,3 +1,4 @@
+// app.js
 require('dotenv').config();
 
 console.log(
@@ -7,17 +8,19 @@ console.log(
   ` Callback=${process.env.CALLBACK_PATH}`
 );
 
-const express    = require('express');
-const session    = require('express-session');
-const passport   = require('passport');
+const express          = require('express');
+const session          = require('express-session');
+const passport         = require('passport');
 const { OIDCStrategy } = require('passport-azure-ad');
-const morgan     = require('morgan');
-const path       = require('path');
-const mysql      = require('mysql2/promise');
+const morgan           = require('morgan');
+const path             = require('path');
+const mysql            = require('mysql2/promise');
 
+// Pick up Azure's port or default to 3000
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
+// ─── MySQL Pool ─────────────────────────────────────────────────────────────
 const pool = mysql.createPool({
   host:               process.env.AZURE_MYSQL_HOST,
   user:               process.env.AZURE_MYSQL_USERNAME,
@@ -29,6 +32,7 @@ const pool = mysql.createPool({
   ssl:                { rejectUnauthorized: true }
 });
 
+// ─── Middleware & Views ─────────────────────────────────────────────────────
 app.use(morgan('dev'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -41,8 +45,12 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.get('/hello', (req, res) => res.send('Hello world'));
+// ─── Simple Test Route ──────────────────────────────────────────────────────
+app.get('/hello', (req, res) => {
+  res.send('Hello world');
+});
 
+// ─── Authorization Middleware ────────────────────────────────────────────────
 function needPerm(permName) {
   return (req, res, next) => {
     if (!req.isAuthenticated || !req.isAuthenticated()) {
@@ -55,41 +63,47 @@ function needPerm(permName) {
   };
 }
 
+// ─── Azure AD B2C Strategy ──────────────────────────────────────────────────
 const azureStrategy = new OIDCStrategy(
   {
     identityMetadata:
       `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
       `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
       `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
-    clientID:                 process.env.AZURE_AD_B2C_CLIENT_ID,
-    clientSecret:             process.env.AZURE_AD_B2C_CLIENT_SECRET,
-    redirectUrl:              `https://${process.env.PUBLIC_HOST}${process.env.CALLBACK_PATH}`,
-    allowHttpForRedirectUrl:  process.env.PUBLIC_HOST.startsWith('localhost'),
-    responseType:             'code',
-    responseMode:             'query',
-    scope:                    ['openid','profile','offline_access'],
-    validateIssuer:           false
+    clientID:                process.env.AZURE_AD_B2C_CLIENT_ID,
+    clientSecret:            process.env.AZURE_AD_B2C_CLIENT_SECRET,
+    redirectUrl:             `https://${process.env.PUBLIC_HOST}${process.env.CALLBACK_PATH}`,
+    allowHttpForRedirectUrl: process.env.PUBLIC_HOST.startsWith('http://'),
+    responseType:            'code',
+    responseMode:            'query',
+    scope:                   ['openid','profile','offline_access'],
+    validateIssuer:          false
   },
   async (iss, sub, profile, accessToken, refreshToken, done) => {
     try {
+      // 1) UPSERT the user
       const email = profile.emails[0];
       const name  = profile.displayName || email.split('@')[0];
 
-      // Upsert user
       await pool.execute(
-        `INSERT INTO users (Username, Email) VALUES (?, ?)
-         ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
+        `INSERT INTO users (Username, Email)
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE
+             Username = VALUES(Username)`,
         [name, email]
       );
 
-      // Fetch ID
+      // 2) Fetch their UserID
       const [[userRow]] = await pool.execute(
-        `SELECT UserID FROM users WHERE Email = ?`, [email]
+        `SELECT UserID FROM users WHERE Email = ?`,
+        [email]
       );
-      if (!userRow) throw new Error('User not found after upsert');
+      if (!userRow) {
+        return done(new Error('User not found after upsert'));
+      }
       profile.dbId = userRow.UserID;
 
-      // Load perms
+      // 3) Load their permissions
       const [rows] = await pool.execute(
         `SELECT p.PermissionName
            FROM permissions p
@@ -100,6 +114,7 @@ const azureStrategy = new OIDCStrategy(
       );
       profile.perms = rows.map(r => r.PermissionName);
 
+      console.log(`User ${email} (id=${profile.dbId}) has perms:`, profile.perms);
       done(null, profile);
 
     } catch (err) {
@@ -109,42 +124,54 @@ const azureStrategy = new OIDCStrategy(
   }
 );
 
+// now log which redirectUri actually got wired up
+console.log('Redirect URI configured as:', azureStrategy._config.redirectUrl);
+
 azureStrategy.name = 'azuread-openidconnect';
-console.log('✅  Redirect URI in use:', azureStrategy._config.redirectUrl);
 passport.use(azureStrategy);
 
-passport.serializeUser((u, done) => done(null, u.dbId));
+// ─── Session Serialization ─────────────────────────────────────────────────
+passport.serializeUser((user, done) => done(null, user.dbId));
 passport.deserializeUser(async (id, done) => {
   try {
     const [[row]] = await pool.execute(
-      `SELECT UserID, Username, Email FROM users WHERE UserID = ?`, [id]
+      `SELECT UserID, Username, Email 
+         FROM users 
+        WHERE UserID = ?`,
+      [id]
     );
-    done(null, row||false);
-  } catch (e) {
-    done(e);
+    done(null, row || false);
+  } catch (err) {
+    done(err);
   }
 });
 
-app.get('/',       (req,res)=>res.render('home',{ user:req.user }));
-app.get('/login',  passport.authenticate('azuread-openidconnect',{failureRedirect:'/'}));
+// ─── Routes ─────────────────────────────────────────────────────────────────
+app.get('/',        (req, res) => res.render('home', { user: req.user }));
+app.get('/login',   passport.authenticate('azuread-openidconnect',{ failureRedirect:'/' }));
 app.get(
   process.env.CALLBACK_PATH,
-  passport.authenticate('azuread-openidconnect',{failureRedirect:'/'}),
-  (req,res)=>res.redirect('/protected')
+  passport.authenticate('azuread-openidconnect',{ failureRedirect:'/' }),
+  (req, res) => res.redirect('/protected')
 );
 
-app.get('/protected', (req,res)=>{
+app.get('/protected', (req, res) => {
   if (!req.isAuthenticated()) return res.redirect('/login');
   res.send(`
     <h1>Welcome, ${req.user.Username}</h1>
-    <p>Permissions: ${req.user.perms.join(', ')}</p>
+    <p>Your permissions: ${req.user.perms.join(', ')}</p>
     <p><a href="/logout">Logout</a></p>
   `);
 });
 
-app.get('/dashboard',      needPerm('ViewDashboard'),    (req,res)=>res.send('<h2>Dashboard</h2>'));
-app.post('/tasks/update',  needPerm('UpdateCareTasks'),  (req,res)=>res.json({success:true}));
+app.get('/dashboard',   needPerm('ViewDashboard'),    (req, res) => res.send('<h2>Dashboard Data…</h2>'));
+app.post('/tasks/update', needPerm('UpdateCareTasks'), (req, res) => res.json({ success: true }));
 
-app.get('/logout', (req,res,next)=> req.logout(err=> err? next(err): res.redirect('/') ));
+app.get('/logout', (req, res, next) => {
+  req.logout(err => err ? next(err) : res.redirect('/'));
+});
 
-app.listen(PORT, ()=> console.log(`Server listening on port ${PORT}`));
+// ─── Start Server ───────────────────────────────────────────────────────────
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+});
