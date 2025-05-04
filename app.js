@@ -15,8 +15,10 @@ const morgan         = require('morgan');
 const path           = require('path');
 const mysql          = require('mysql2/promise');
 
+// Pick up Azure's port or default to 3000
 const PORT = process.env.PORT || 3000;
-const app  = express();
+
+const app = express();
 
 // ─── MySQL Pool ─────────────────────────────────────────────────────────────
 const pool = mysql.createPool({
@@ -36,9 +38,9 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
-  secret:           'your-session-secret',
-  resave:           false,
-  saveUninitialized:false
+  secret:            'your-session-secret',
+  resave:            false,
+  saveUninitialized: false
 }));
 app.use(passport.initialize());
 app.use(passport.session());
@@ -54,7 +56,7 @@ function needPerm(permName) {
     if (!req.isAuthenticated || !req.isAuthenticated()) {
       return res.redirect('/login');
     }
-    if (req.user.perms?.includes(permName)) {
+    if (req.user.perms && req.user.perms.includes(permName)) {
       return next();
     }
     return res.status(403).send(`Forbidden – you need the "${permName}" permission`);
@@ -62,8 +64,9 @@ function needPerm(permName) {
 }
 
 // ─── Azure AD B2C Strategy ──────────────────────────────────────────────────
-const strategy = new OIDCStrategy({
-    identityMetadata:          
+const azureStrategy = new OIDCStrategy(
+  {
+    identityMetadata:
       `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
       `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
       `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
@@ -76,61 +79,66 @@ const strategy = new OIDCStrategy({
     scope:          ['openid','profile','offline_access'],
     validateIssuer: false
   },
-    /* … callback … */
-    console.log('Redirect URI sent to B2C =>', azureStrategy._config.redirectUrl);
   async (iss, sub, profile, accessToken, refreshToken, done) => {
     try {
-      // 1) Upsert the user
+      // 1) UPSERT the user
       const email = profile.emails[0];
       const name  = profile.displayName || email.split('@')[0];
+
       await pool.execute(
         `INSERT INTO users (Username, Email)
          VALUES (?, ?)
          ON DUPLICATE KEY UPDATE
            Username = VALUES(Username)`,
-        [ name, email ]
+        [name, email]
       );
 
-      // fetch their UserID
+      // Retrieve their UserID
       const [[userRow]] = await pool.execute(
         `SELECT UserID FROM users WHERE Email = ?`,
-        [ email ]
+        [email]
       );
       if (!userRow) {
-        return done(new Error('Could not find user after upsert'));
+        return done(new Error('User not found after upsert'));
       }
       profile.dbId = userRow.UserID;
 
-      // 2) Load their permissions
-      const [ perms ] = await pool.execute(
+      // 2) LOAD their permissions via RBAC tables
+      const [perms] = await pool.execute(
         `SELECT p.PermissionName
            FROM permissions p
            JOIN rolepermissions rp ON rp.PermissionID = p.PermissionID
            JOIN userroles ur       ON ur.RoleID       = rp.RoleID
           WHERE ur.UserID = ?`,
-        [ profile.dbId ]
+        [profile.dbId]
       );
       profile.perms = perms.map(r => r.PermissionName);
 
       console.log(`User ${email} (id=${profile.dbId}) has perms:`, profile.perms);
-      return done(null, profile);
+      done(null, profile);
+
     } catch (err) {
       console.error('Auth callback error:', err);
-      return done(err);
+      done(err);
     }
   }
 );
 
-strategy.name = 'azuread-openidconnect';
-passport.use(strategy);
+// Log exactly which redirectUri is being used
+console.log('Redirect URI configured as:', azureStrategy._config.redirectUrl);
+
+azureStrategy.name = 'azuread-openidconnect';
+passport.use(azureStrategy);
 
 // ─── Session Serialization ─────────────────────────────────────────────────
 passport.serializeUser((user, done) => done(null, user.dbId));
 passport.deserializeUser(async (id, done) => {
   try {
     const [[row]] = await pool.execute(
-      `SELECT UserID, Username, Email FROM users WHERE UserID = ?`,
-      [ id ]
+      `SELECT UserID, Username, Email
+         FROM users
+        WHERE UserID = ?`,
+      [id]
     );
     done(null, row || false);
   } catch (err) {
@@ -139,16 +147,16 @@ passport.deserializeUser(async (id, done) => {
 });
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
-app.get('/',        (req, res) => res.render('home',{ user: req.user }));
-app.get('/login',   passport.authenticate('azuread-openidconnect',{ failureRedirect:'/' }));
+app.get('/',       (req, res) => res.render('home',   { user: req.user }));
+app.get('/login',  passport.authenticate('azuread-openidconnect',{ failureRedirect:'/' }));
 app.get(
   process.env.CALLBACK_PATH,
   passport.authenticate('azuread-openidconnect',{ failureRedirect:'/' }),
   (req, res) => res.redirect('/protected')
 );
 
-app.get('/protected', (req,res)=>{
-  if(!req.isAuthenticated()) return res.redirect('/login');
+app.get('/protected', (req, res) => {
+  if (!req.isAuthenticated()) return res.redirect('/login');
   res.send(`
     <h1>Welcome, ${req.user.Username}</h1>
     <p>Your permissions: ${req.user.perms.join(', ')}</p>
@@ -156,19 +164,14 @@ app.get('/protected', (req,res)=>{
   `);
 });
 
-app.get('/dashboard', needPerm('ViewDashboard'), (req,res)=>{
-  res.send('<h2>Dashboard Data…</h2>');
-});
+app.get('/dashboard',   needPerm('ViewDashboard'),    (req, res) => res.send('<h2>Dashboard Data…</h2>'));
+app.post('/tasks/update', needPerm('UpdateCareTasks'), (req, res) => res.json({ success: true }));
 
-app.post('/tasks/update', needPerm('UpdateCareTasks'), (req,res)=>{
-  res.json({ success:true });
-});
-
-app.get('/logout', (req,res,next)=>{
-  req.logout(err=> err ? next(err) : res.redirect('/') );
+app.get('/logout', (req, res, next) => {
+  req.logout(err => err ? next(err) : res.redirect('/'));
 });
 
 // ─── Start Server ───────────────────────────────────────────────────────────
-app.listen(PORT, ()=> {
+app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
