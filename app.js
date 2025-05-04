@@ -22,18 +22,18 @@ const PORT = process.env.PORT || 3000;
 const app  = express();
 
 // ─── Compute a single redirectUri ────────────────────────────────────────
-const rawHost      = process.env.PUBLIC_HOST || ''
-const host         = rawHost.startsWith('http') 
-                         ? rawHost 
-                         : `https://${rawHost}`
+const rawHost      = process.env.PUBLIC_HOST || '';
+const host         = rawHost.startsWith('http')
+                         ? rawHost
+                         : `https://${rawHost}`;
 const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
                          ? process.env.CALLBACK_PATH
-                         : `/${process.env.CALLBACK_PATH}`
-const redirectUri  = `${host}${callbackPath}`
+                         : `/${process.env.CALLBACK_PATH}`;
+const redirectUri  = `${host}${callbackPath}`;
 
-console.log('→ Using redirectUri:', redirectUri)
+console.log('→ Using redirectUri:', redirectUri);
 
-// ─── MySQL Pool ─────────────────────────────────────────────────────────────
+// ─── MySQL Pool ───────────────────────────────────────────────────────────
 const pool = mysql.createPool({
   host:               process.env.AZURE_MYSQL_HOST,
   user:               process.env.AZURE_MYSQL_USERNAME,
@@ -45,7 +45,7 @@ const pool = mysql.createPool({
   ssl:                { rejectUnauthorized: true }
 });
 
-// ─── Middleware & Views ─────────────────────────────────────────────────────
+// ─── Middleware & Views ────────────────────────────────────────────────────
 app.use(morgan('dev'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -58,12 +58,12 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ─── Simple Test Route ──────────────────────────────────────────────────────
+// ─── Simple Test Route ─────────────────────────────────────────────────────
 app.get('/hello', (req, res) => {
   res.send('Hello world');
 });
 
-// ─── Authorization Middleware ────────────────────────────────────────────────
+// ─── Authorization Middleware ───────────────────────────────────────────────
 function needPerm(permName) {
   return (req, res, next) => {
     if (!req.isAuthenticated || !req.isAuthenticated()) {
@@ -76,20 +76,20 @@ function needPerm(permName) {
   };
 }
 
-// ─── Azure AD B2C Strategy ──────────────────────────────────────────────────
+// ─── Azure AD B2C Strategy ─────────────────────────────────────────────────
 const azureStrategy = new OIDCStrategy(
   {
-    identityMetadata:          `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
-                               `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
-                               `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
-    clientID:                  process.env.AZURE_AD_B2C_CLIENT_ID,
-    clientSecret:              process.env.AZURE_AD_B2C_CLIENT_SECRET,
-    redirectUrl:               redirectUri,
-    allowHttpForRedirectUrl:   process.env.PUBLIC_HOST.startsWith('http://'),
-    responseType:              'code',
-    responseMode:              'query',
-    scope:                     ['openid','profile','offline_access'],
-    validateIssuer:            false
+    identityMetadata:        `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
+                             `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
+                             `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
+    clientID:                process.env.AZURE_AD_B2C_CLIENT_ID,
+    clientSecret:            process.env.AZURE_AD_B2C_CLIENT_SECRET,
+    redirectUrl:             redirectUri,
+    allowHttpForRedirectUrl: process.env.PUBLIC_HOST.startsWith('http://'),
+    responseType:            'code',
+    responseMode:            'query',
+    scope:                   ['openid','profile','offline_access'],
+    validateIssuer:          false
   },
   async (iss, sub, profile, accessToken, refreshToken, done) => {
     try {
@@ -154,11 +154,19 @@ passport.deserializeUser(async (id, done) => {
 });
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
-app.get('/',       (req, res) => res.render('home', { user: req.user }));
-app.get('/login',  passport.authenticate('azuread-openidconnect', { failureRedirect:'/' }));
+// log the redirectUri just before starting auth
 app.get(
-  process.env.CALLBACK_PATH,
-  passport.authenticate('azuread-openidconnect', { failureRedirect:'/' }),
+  '/login',
+  (req, res, next) => {
+    console.log('→ [login] redirectUri =', redirectUri);
+    next();
+  },
+  passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
+);
+
+app.get(
+  callbackPath,
+  passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   (req, res) => res.redirect('/protected')
 );
 
@@ -171,8 +179,8 @@ app.get('/protected', (req, res) => {
   `);
 });
 
-app.get('/dashboard',       needPerm('ViewDashboard'),   (req, res) => res.send('<h2>Dashboard Data…</h2>'));
-app.post('/tasks/update',   needPerm('UpdateCareTasks'), (req, res) => res.json({ success: true }));
+app.get('/dashboard',      needPerm('ViewDashboard'),   (req, res) => res.send('<h2>Dashboard Data…</h2>'));
+app.post('/tasks/update',  needPerm('UpdateCareTasks'), (req, res) => res.json({ success: true }));
 
 app.get('/logout', (req, res, next) => {
   req.logout(err => err ? next(err) : res.redirect('/'));
