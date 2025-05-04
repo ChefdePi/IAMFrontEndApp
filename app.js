@@ -124,8 +124,8 @@ const azureStrategy = new OIDCStrategy(
   }
 );
 
-// now log which redirectUri actually got wired up
-console.log('Redirect URI configured as:', azureStrategy._config.redirectUrl);
+// Log exactly which redirectUri is being used
+console.log('Redirect URI configured as:', azureStrategy._options.redirectUrl);
 
 azureStrategy.name = 'azuread-openidconnect';
 passport.use(azureStrategy);
@@ -135,9 +135,7 @@ passport.serializeUser((user, done) => done(null, user.dbId));
 passport.deserializeUser(async (id, done) => {
   try {
     const [[row]] = await pool.execute(
-      `SELECT UserID, Username, Email 
-         FROM users 
-        WHERE UserID = ?`,
+      `SELECT UserID, Username, Email FROM users WHERE UserID = ?`,
       [id]
     );
     done(null, row || false);
@@ -164,8 +162,8 @@ app.get('/protected', (req, res) => {
   `);
 });
 
-app.get('/dashboard',   needPerm('ViewDashboard'),    (req, res) => res.send('<h2>Dashboard Data…</h2>'));
-app.post('/tasks/update', needPerm('UpdateCareTasks'), (req, res) => res.json({ success: true }));
+app.get('/dashboard',      needPerm('ViewDashboard'),    (req, res) => res.send('<h2>Dashboard Data…</h2>'));
+app.post('/tasks/update',  needPerm('UpdateCareTasks'),  (req, res) => res.json({ success: true }));
 
 app.get('/logout', (req, res, next) => {
   req.logout(err => err ? next(err) : res.redirect('/'));
