@@ -1,6 +1,7 @@
 // app.js
 require('dotenv').config();
 
+// Log basic ENV load
 console.log(
   `Loaded ENV: Tenant=${process.env.AZURE_AD_B2C_TENANT}` +
   ` Policy=${process.env.AZURE_AD_B2C_POLICY}` +
@@ -19,6 +20,17 @@ const mysql            = require('mysql2/promise');
 // Pick up Azure's port or default to 3000
 const PORT = process.env.PORT || 3000;
 const app  = express();
+
+// ─── Calculate a single redirectUri ─────────────────────────────────────────
+// ensure PUBLIC_HOST has protocol, ensure CALLBACK_PATH has leading slash
+const rawHost     = process.env.PUBLIC_HOST || '';
+const host        = rawHost.startsWith('http') ? rawHost : `https://${rawHost}`;
+const callbackPath= process.env.CALLBACK_PATH.startsWith('/')
+  ? process.env.CALLBACK_PATH
+  : `/${process.env.CALLBACK_PATH}`;
+const redirectUri = `${host}${callbackPath}`;
+
+console.log('→ Using redirectUri:', redirectUri);
 
 // ─── MySQL Pool ─────────────────────────────────────────────────────────────
 const pool = mysql.createPool({
@@ -66,22 +78,21 @@ function needPerm(permName) {
 // ─── Azure AD B2C Strategy ──────────────────────────────────────────────────
 const azureStrategy = new OIDCStrategy(
   {
-    identityMetadata:
-      `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
-      `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
-      `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
-    clientID:                process.env.AZURE_AD_B2C_CLIENT_ID,
-    clientSecret:            process.env.AZURE_AD_B2C_CLIENT_SECRET,
-    redirectUrl:             `https://${process.env.PUBLIC_HOST}${process.env.CALLBACK_PATH}`,
-    allowHttpForRedirectUrl: process.env.PUBLIC_HOST.startsWith('http://'),
-    responseType:            'code',
-    responseMode:            'query',
-    scope:                   ['openid','profile','offline_access'],
-    validateIssuer:          false
+    identityMetadata:          `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
+                               `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
+                               `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
+    clientID:                  process.env.AZURE_AD_B2C_CLIENT_ID,
+    clientSecret:              process.env.AZURE_AD_B2C_CLIENT_SECRET,
+    redirectUrl:               redirectUri,
+    allowHttpForRedirectUrl:   process.env.PUBLIC_HOST.startsWith('http://'),
+    responseType:              'code',
+    responseMode:              'query',
+    scope:                     ['openid','profile','offline_access'],
+    validateIssuer:            false
   },
   async (iss, sub, profile, accessToken, refreshToken, done) => {
     try {
-      // 1) UPSERT the user
+      // 1) Upsert the user
       const email = profile.emails[0];
       const name  = profile.displayName || email.split('@')[0];
 
@@ -124,9 +135,6 @@ const azureStrategy = new OIDCStrategy(
   }
 );
 
-// Log exactly which redirectUri is being used
-console.log('Redirect URI configured as:', azureStrategy._options.redirectUrl);
-
 azureStrategy.name = 'azuread-openidconnect';
 passport.use(azureStrategy);
 
@@ -145,11 +153,11 @@ passport.deserializeUser(async (id, done) => {
 });
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
-app.get('/',        (req, res) => res.render('home', { user: req.user }));
-app.get('/login',   passport.authenticate('azuread-openidconnect',{ failureRedirect:'/' }));
+app.get('/',       (req, res) => res.render('home', { user: req.user }));
+app.get('/login',  passport.authenticate('azuread-openidconnect', { failureRedirect:'/' }));
 app.get(
   process.env.CALLBACK_PATH,
-  passport.authenticate('azuread-openidconnect',{ failureRedirect:'/' }),
+  passport.authenticate('azuread-openidconnect', { failureRedirect:'/' }),
   (req, res) => res.redirect('/protected')
 );
 
@@ -162,8 +170,8 @@ app.get('/protected', (req, res) => {
   `);
 });
 
-app.get('/dashboard',      needPerm('ViewDashboard'),    (req, res) => res.send('<h2>Dashboard Data…</h2>'));
-app.post('/tasks/update',  needPerm('UpdateCareTasks'),  (req, res) => res.json({ success: true }));
+app.get('/dashboard',       needPerm('ViewDashboard'),   (req, res) => res.send('<h2>Dashboard Data…</h2>'));
+app.post('/tasks/update',   needPerm('UpdateCareTasks'), (req, res) => res.json({ success: true }));
 
 app.get('/logout', (req, res, next) => {
   req.logout(err => err ? next(err) : res.redirect('/'));
