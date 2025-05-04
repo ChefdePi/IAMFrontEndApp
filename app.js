@@ -21,16 +21,17 @@ const mysql            = require('mysql2/promise');
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
-// ─── Calculate a single redirectUri ─────────────────────────────────────────
-// ensure PUBLIC_HOST has protocol, ensure CALLBACK_PATH has leading slash
-const rawHost     = process.env.PUBLIC_HOST || '';
-const host        = rawHost.startsWith('http') ? rawHost : `https://${rawHost}`;
-const callbackPath= process.env.CALLBACK_PATH.startsWith('/')
-  ? process.env.CALLBACK_PATH
-  : `/${process.env.CALLBACK_PATH}`;
-const redirectUri = `${host}${callbackPath}`;
+// ─── Compute a single redirectUri ────────────────────────────────────────
+const rawHost      = process.env.PUBLIC_HOST || ''
+const host         = rawHost.startsWith('http') 
+                         ? rawHost 
+                         : `https://${rawHost}`
+const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
+                         ? process.env.CALLBACK_PATH
+                         : `/${process.env.CALLBACK_PATH}`
+const redirectUri  = `${host}${callbackPath}`
 
-console.log('→ Using redirectUri:', redirectUri);
+console.log('→ Using redirectUri:', redirectUri)
 
 // ─── MySQL Pool ─────────────────────────────────────────────────────────────
 const pool = mysql.createPool({
