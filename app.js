@@ -96,7 +96,6 @@ const azureStrategy = new OIDCStrategy(
       // 1) Upsert the user
       const email = profile.emails[0];
       const name  = profile.displayName || email.split('@')[0];
-
       await pool.execute(
         `INSERT INTO users (Username, Email)
            VALUES (?, ?)
@@ -154,7 +153,8 @@ passport.deserializeUser(async (id, done) => {
 });
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
-// log the redirectUri just before starting auth
+
+// Login route with debug
 app.get(
   '/login',
   (req, res, next) => {
@@ -164,12 +164,21 @@ app.get(
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
 
+// Callback route with debug
 app.get(
   callbackPath,
+  (req, res, next) => {
+    console.log('→ [callback] query =', req.query);
+    next();
+  },
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
-  (req, res) => res.redirect('/protected')
+  (req, res) => {
+    console.log('→ [callback] authenticated user =', req.user);
+    res.redirect('/protected');
+  }
 );
 
+// Protected page
 app.get('/protected', (req, res) => {
   if (!req.isAuthenticated()) return res.redirect('/login');
   res.send(`
@@ -179,11 +188,19 @@ app.get('/protected', (req, res) => {
   `);
 });
 
-app.get('/dashboard',      needPerm('ViewDashboard'),   (req, res) => res.send('<h2>Dashboard Data…</h2>'));
-app.post('/tasks/update',  needPerm('UpdateCareTasks'), (req, res) => res.json({ success: true }));
+// Example protected route
+app.get('/dashboard', needPerm('ViewDashboard'), (req, res) =>
+  res.send('<h2>Dashboard Data…</h2>')
+);
 
+// Example POST-only route
+app.post('/tasks/update', needPerm('UpdateCareTasks'), (req, res) =>
+  res.json({ success: true })
+);
+
+// Logout
 app.get('/logout', (req, res, next) => {
-  req.logout(err => err ? next(err) : res.redirect('/'));
+  req.logout(err => (err ? next(err) : res.redirect('/')));
 });
 
 // ─── Start Server ───────────────────────────────────────────────────────────
