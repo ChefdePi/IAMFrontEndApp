@@ -75,7 +75,6 @@ const azureStrategy = new OIDCStrategy(
       `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
       `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
       `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
-    issuer:            'https://eld3rsecb2c.b2clogin.com/6f61f7c7-e051-4385-bae7-793d6e46047b/v2.0/',
     clientID:          process.env.AZURE_AD_B2C_CLIENT_ID,
     clientSecret:      process.env.AZURE_AD_B2C_CLIENT_SECRET,
     redirectUrl:       redirectUri,
@@ -83,7 +82,7 @@ const azureStrategy = new OIDCStrategy(
     responseType:      'code',
     responseMode:      'query',
     scope:             ['openid', 'profile', 'offline_access'],
-    validateIssuer:    true
+    validateIssuer:    false
   },
   async (_iss, _sub, profile, _at, _rt, done) => {
     try {
