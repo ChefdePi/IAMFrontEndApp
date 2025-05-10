@@ -13,8 +13,8 @@ const app  = express();
 
 // ─── Build redirectUri & host ────────────────────────────────────────
 const rawHost      = process.env.PUBLIC_HOST || '';
-const host         = rawHost.startsWith('http') 
-                     ? rawHost 
+const host         = rawHost.startsWith('http')
+                     ? rawHost
                      : `https://${rawHost}`;
 const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
                      ? process.env.CALLBACK_PATH
@@ -56,9 +56,10 @@ function ensureLoggedIn(req, res, next) {
 
 // ─── Azure B2C OIDC Strategy ────────────────────────────────────────
 const tenant = process.env.AZURE_AD_B2C_TENANT;
-const policy = process.env.AZURE_AD_B2C_POLICY;  // must be B2C_1_signin_signup
+const policy = process.env.AZURE_AD_B2C_POLICY;  // e.g. "B2C_1_signin_signup"
+
 passport.use('azuread-openidconnect', new OIDCStrategy({
-    // include "?p=" so the metadata has absolute URLs
+    // Policy‐specific metadata (absolute URLs)
     identityMetadata:
       `https://${tenant}.b2clogin.com/${tenant}.onmicrosoft.com/` +
       `${policy}/v2.0/.well-known/openid-configuration` +
@@ -74,7 +75,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
-      // 1) Extract email
+      // 1) Extract or synthesize an email
       let email =
            profile?.emails?.[0]
         || profile?._json?.emails?.[0]
@@ -82,21 +83,21 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         || profile?.upn
         || null;
       if (!email) {
-        console.warn('⚠️ No email in token; falling back to sub:', profile.sub);
+        console.warn('⚠️ No email claim; falling back to sub:', profile.sub);
         email = `${profile.sub}@no-email.local`;
       }
       profile.Email = email;
-      const name    = profile.displayName || email.split('@')[0];
+      profile.Username = profile.displayName || email.split('@')[0];
 
-      // 2) Upsert a shell user
+      // 2) Upsert a “shell” user record
       await pool.execute(
         `INSERT INTO users (Username, Email)
            VALUES (?, ?)
            ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
-        [name, email]
+        [profile.Username, email]
       );
 
-      // 3) Check profile completion
+      // 3) Fetch completion flag
       const [[u]] = await pool.execute(
         `SELECT UserID, profile_complete
            FROM users
@@ -105,10 +106,10 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       );
       profile.UserID           = u.UserID;
       profile.profile_complete = u.profile_complete === 1;
-      profile.Username         = name;
+      profile.profileComplete  = u.profile_complete === 1;  // camelCase for your EJS
 
-      // 4) Load perms if complete
-      if (profile.profile_complete) {
+      // 4) Load permissions if they’ve completed
+      if (profile.profileComplete) {
         const [rows] = await pool.execute(`
           SELECT p.PermissionName
             FROM permissions p
@@ -124,7 +125,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       console.log('→ Auth OK:', {
         email:    profile.Email,
         userId:   profile.UserID,
-        complete: profile.profile_complete
+        complete: profile.profileComplete
       });
       done(null, profile);
 
@@ -135,19 +136,17 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
   }
 ));
 
-passport.serializeUser((user, done)    => done(null, user));
-passport.deserializeUser((obj, done)    => done(null, obj));
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((obj, done) => done(null, obj));
 
 // ─── ROUTES ──────────────────────────────────────────────────────────
 
 // Public Home
 app.get('/', (req, res) => {
-  // if you prefer auto-redirect logged-in users:
-  // if (req.isAuthenticated()) return res.redirect('/dashboard');
   res.render('home', { user: req.user });
 });
 
-// Kick off B2C login
+// Kick off login
 app.get('/login',
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
@@ -156,8 +155,7 @@ app.get('/login',
 app.get(callbackPath,
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   (req, res) => {
-    // first-timers → finish signup; others → dashboard
-    if (!req.user.profile_complete) {
+    if (!req.user.profileComplete) {
       return res.redirect('/complete-profile');
     }
     res.redirect('/dashboard');
@@ -182,13 +180,13 @@ app.get('/logout', (req, res, next) => {
       if (err) return next(err);
       res.clearCookie('connect.sid', { path: '/' });
 
-      // Azure B2C logout
       const postLogout = encodeURIComponent(host);
       const signOutUrl =
         `https://${tenant}.b2clogin.com/` +
         `${tenant}.onmicrosoft.com/${policy}/oauth2/v2.0/logout` +
         `?p=${policy}` +
         `&post_logout_redirect_uri=${postLogout}`;
+
       res.redirect(signOutUrl);
     });
   });
