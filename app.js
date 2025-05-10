@@ -11,107 +11,156 @@ const signupRouter     = require('./routes/signup');
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
-// ─── Build redirectUri ────────────────────────────────
+// ─── Build redirectUri ───────────────────────────────────────────────────────
 const rawHost      = process.env.PUBLIC_HOST || '';
-const host         = rawHost.startsWith('http')
-                     ? rawHost
-                     : `https://${rawHost}`;
+const host         = rawHost.startsWith('http') ? rawHost : `https://${rawHost}`;
 const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
                      ? process.env.CALLBACK_PATH
                      : `/${process.env.CALLBACK_PATH}`;
 const redirectUri  = `${host}${callbackPath}`;
 console.log('→ Using redirectUri:', redirectUri);
 
-// ─── Middleware ────────────────────────────────────────
+// ─── Express / EJS / Static ─────────────────────────────────────────────────
 app.use(morgan('dev'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
-// for form_post on the callback:
 app.use(express.urlencoded({ extended: true }));
 
-// ─── Secure Session Cookies ────────────────────────────
+// ─── Secure Session Cookies ─────────────────────────────────────────────────
 app.set('trust proxy', 1);
 app.use(session({
   secret:            process.env.SESSION_SECRET || 'fallback-secret-9876',
   resave:            false,
   saveUninitialized: false,
   cookie: {
-    secure:   true,      // Azure Web Apps is HTTPS
-    sameSite: 'Lax',     // CSRF protection
-    maxAge:   1000 * 60 * 30
+    secure:   true,    // Azure requires HTTPS
+    sameSite: 'Lax',   // CSRF protection
+    maxAge:   1000 * 60 * 30  // 30 minutes
   }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ─── Mount any sign-up/profile-completion routes ──────
+// ─── Mount profile‐completion routes ────────────────────────────────────────
 app.use(signupRouter);
 
-// ─── OIDC Strategy (Implicit / ID-token flow) ────────
+// ─── Azure B2C OIDC Strategy ───────────────────────────────────────────────
 passport.use('azuread-openidconnect', new OIDCStrategy({
-    identityMetadata: 
-      `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
-      `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
-      `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
-    clientID:                process.env.AZURE_AD_B2C_CLIENT_ID,
-    clientSecret:            process.env.AZURE_AD_B2C_CLIENT_SECRET,
-    redirectUrl:             redirectUri,
-
-    // ← IMPLICIT FLOW SETTINGS
-    responseType:    'id_token',
-    responseMode:    'form_post',
-    scope:           ['openid','email','profile'],
-
+    identityMetadata:  `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
+                       `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
+                       `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
+    clientID:          process.env.AZURE_AD_B2C_CLIENT_ID,
+    clientSecret:      process.env.AZURE_AD_B2C_CLIENT_SECRET,
+    redirectUrl:       redirectUri,
+    responseType:      'code',
+    responseMode:      'query',
+    scope:             ['openid','profile','email','offline_access'],
     allowHttpForRedirectUrl: host.startsWith('http://'),
-    validateIssuer:          false
+    validateIssuer:    false
   },
-  // verify callback
-  async (iss, sub, profile, _accessToken, _refreshToken, done) => {
-    // just log out the raw JSON so you can see if email is present:
-    console.log('✅ IMPLICIT CALLBACK – raw profile:', JSON.stringify(profile._json, null,2));
-    // for now, skip any DB logic and return the profile
-    return done(null, profile);
+  async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
+    try {
+      // ── 1) Pull email out of whatever claim we got ─────────────────────────
+      let email =
+           profile?.emails?.[0]             // if Azure put it under .emails
+        || profile?._json?.emails?.[0]      // or ._json.emails
+        || profile?._json?.email            // or a single .email claim
+        || profile?.upn                     // or UPN
+        || null;
+
+      // If you still don’t have an email, *synthesize* one from the sub:
+      if (!email) {
+        console.warn('⚠️ No email in ID token; falling back to sub:', profile.sub);
+        email = `${profile.sub}@no-email.local`;
+      }
+
+      // attach to profile
+      profile.Email = email;
+      const name    = profile.displayName || email.split('@')[0];
+
+      // ── 2) Upsert your user shell ────────────────────────────────────────
+      await pool.execute(
+        `INSERT INTO users (Username, Email)
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
+        [name, email]
+      );
+
+      // fetch UserID & perms
+      const [[u]]   = await pool.execute(`SELECT UserID FROM users WHERE Email = ?`, [email]);
+      const [rows]  = await pool.execute(`
+        SELECT p.PermissionName
+          FROM permissions p
+          JOIN rolepermissions rp ON rp.PermissionID = p.PermissionID
+          JOIN userroles ur       ON ur.RoleID       = rp.RoleID
+         WHERE ur.UserID = ?`,
+        [u.UserID]
+      );
+
+      profile.dbId     = u.UserID;
+      profile.UserID   = u.UserID;
+      profile.Username = name;
+      profile.perms    = rows.map(r => r.PermissionName);
+
+      console.log('→ Auth Success – Profile:', {
+        email: profile.Email,
+        dbId:  profile.dbId,
+        perms: profile.perms
+      });
+
+      // ── 3) Tell Passport “we’re good” ───────────────────────────────────
+      done(null, profile);
+    } catch (err) {
+      console.error('🔴 Auth callback error', err);
+      done(err);
+    }
   }
 ));
 
-// ─── Session serialization ────────────────────────────
+// ─── Sessions ────────────────────────────────────────────────────────────────
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
-// ─── Routes ────────────────────────────────────────────
+// ─── ROUTES ──────────────────────────────────────────────────────────────────
 
 // Home
-app.get('/', (req, res) => res.render('home', { user: req.user }));
+app.get('/', (req, res) => {
+  res.render('home', { user: req.user });
+});
 
 // Kick off login
 app.get('/login',
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
 
-// ← NB: we must accept POST for form_post
-app.post(callbackPath,
+// CB – on return from Azure B2C
+app.get(callbackPath,
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   (req, res) => {
-    // If you see email in your logs above, you know B2C is sending it.
-    // Then you can add your upsert/role-lookup logic here,
-    // switch back to code flow, and add offline_access.
+    console.log('✅ PASSED AUTH CALLBACK – user:', req.user.Username, req.user.Email);
+    // now that we’re actually authenticated, go see the protected page
     res.redirect('/protected');
   }
 );
 
 // Protected example
 app.get('/protected', (req, res) => {
+  console.log('→ Protected Route – req.isAuthenticated? →', req.isAuthenticated());
   if (!req.isAuthenticated()) return res.redirect('/login');
-  console.log('→ Protected Route – user JSON:', req.user._json);
-  res.send(`Hello ${(req.user._json.email||req.user._json.preferred_username||'user')}!`);
+  res.send(`
+    <h1>Welcome, ${req.user.Username}</h1>
+    <p>Your email: ${req.user.Email}</p>
+    <p>Perms: ${req.user.perms.join(', ') || '(none)'}</p>
+    <a href="/logout">Logout</a>
+  `);
 });
 
 // Logout
-app.get('/logout', (req, res) => {
-  req.logout(() => res.redirect('/'));
-});
+app.get('/logout', (req, res, next) =>
+  req.logout(err => err ? next(err) : res.redirect('/'))
+);
 
-// Start
+// Start the server
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
