@@ -1,63 +1,53 @@
 require('dotenv').config();
-
-// ─── ENV DEBUG ──────────────────────────────────────────────────────────────
-console.log(
-  `Loaded ENV: Tenant=${process.env.AZURE_AD_B2C_TENANT}` +
-  ` Policy=${process.env.AZURE_AD_B2C_POLICY}` +
-  ` ClientID=${process.env.AZURE_AD_B2C_CLIENT_ID}` +
-  ` Callback=${process.env.CALLBACK_PATH}`
-);
-
 const express          = require('express');
 const session          = require('express-session');
 const passport         = require('passport');
 const { OIDCStrategy } = require('passport-azure-ad');
 const morgan           = require('morgan');
 const path             = require('path');
-
-// ← your DB pool (not used in this minimal test, but leave it mounted)
-const pool         = require('./db');
+const pool             = require('./db');
+const signupRouter     = require('./routes/signup');
 
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
-// ─── Build redirectUri ──────────────────────────────────────────────────────
+// ─── Build redirectUri ────────────────────────────────
 const rawHost      = process.env.PUBLIC_HOST || '';
-const host         = rawHost.startsWith('http')
-                     ? rawHost
-                     : `https://${rawHost}`;
+const host         = rawHost.startsWith('http') ? rawHost : `https://${rawHost}`;
 const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
                      ? process.env.CALLBACK_PATH
                      : `/${process.env.CALLBACK_PATH}`;
 const redirectUri  = `${host}${callbackPath}`;
 console.log('→ Using redirectUri:', redirectUri);
 
-// ─── Express / EJS / Static ─────────────────────────────────────────────────
+// ─── Express / EJS / Static ───────────────────────────
 app.use(morgan('dev'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.urlencoded({ extended: true }));
 
-// ─── Secure Session Cookies ─────────────────────────────────────────────────
+// ─── Secure Session Cookies ────────────────────────────
 app.set('trust proxy', 1);
 app.use(session({
-  secret:            process.env.SESSION_SECRET,
-  resave:            false,
+  secret: process.env.SESSION_SECRET || 'fallback-secret-9876',
+  resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true,
-    sameSite: 'lax',
-    maxAge: 30 * 60 * 1000
+    secure: true,        // Azure requires HTTPS
+    sameSite: 'Lax',     // CSRF protection
+    maxAge: 1000 * 60 * 30  // 30 minutes
   }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ─── Azure B2C OIDC Strategy ─────────────────────────────────────────────────
-passport.use('azuread-openidconnect', new OIDCStrategy(
-  {
+// ─── Mount profile‐completion routes ─────────────────
+app.use(signupRouter);
+
+// ─── Azure B2C OIDC Strategy ─────────────────────────
+passport.use(new OIDCStrategy({
     identityMetadata:
       `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
       `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
@@ -65,56 +55,88 @@ passport.use('azuread-openidconnect', new OIDCStrategy(
     clientID:                process.env.AZURE_AD_B2C_CLIENT_ID,
     clientSecret:            process.env.AZURE_AD_B2C_CLIENT_SECRET,
     redirectUrl:             redirectUri,
-    allowHttpForRedirectUrl: host.startsWith('http://'),
     responseType:            'code',
     responseMode:            'query',
     scope:                   ['openid','profile','offline_access'],
+    allowHttpForRedirectUrl: host.startsWith('http://'),
     validateIssuer:          false
   },
-  (iss, sub, profile, accessToken, refreshToken, done) => {
-    // minimal: just pass the profile through
-    done(null, profile);
+  async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
+    try {
+      const email = profile.emails[0];
+      profile.Email = email;
+      const name = profile.displayName || email.split('@')[0];
+
+      // upsert user record
+      await pool.execute(
+        `INSERT INTO users (Username, Email)
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
+        [name, email]
+      );
+
+      // fetch UserID & perms
+      const [[u]] = await pool.execute(
+        `SELECT UserID FROM users WHERE Email = ?`, [email]
+      );
+      const [rows] = await pool.execute(`
+        SELECT p.PermissionName
+          FROM permissions p
+          JOIN rolepermissions rp ON rp.PermissionID = p.PermissionID
+          JOIN userroles ur       ON ur.RoleID       = rp.RoleID
+         WHERE ur.UserID = ?`, [u.UserID]
+      );
+
+      profile.dbId     = u.UserID;
+      profile.UserID   = u.UserID;
+      profile.Username = name;
+      profile.perms    = rows.map(r => r.PermissionName);
+
+      console.log('→ Auth Success - Profile:', {
+        email:    profile.Email,
+        dbId:     profile.dbId,
+        perms:    profile.perms
+      });
+
+      done(null, profile);
+    } catch (err) {
+      done(err);
+    }
   }
 ));
 
-// ─── Sessions ────────────────────────────────────────────────────────────────
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
-// ─── ROUTES ──────────────────────────────────────────────────────────────────
+// ─── Routes ────────────────────────────────────────────
 
-// home
+// Home
 app.get('/', (req, res) => res.render('home', { user: req.user }));
 
-// login
+// Kick off login
 app.get('/login',
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
 
-// CALLBACK – minimal proof it fired
+// Callback
 app.get(callbackPath,
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   (req, res) => {
-    console.log('✅  PASSED AUTH CALLBACK – user:', req.user.emails[0]);
-    return res.redirect('/dashboard');
+    // redirect on every login; profile-complete logic can go back here next
+    res.redirect('/protected');
   }
 );
 
-// require-login helper
-function ensureLoggedIn(req, res, next) {
+// Protected example
+app.get('/protected', (req, res) => {
+  console.log('→ Protected Route - User:', req.user?.Email);
   if (!req.isAuthenticated()) return res.redirect('/login');
-  next();
-}
-
-// dashboard
-app.get('/dashboard', ensureLoggedIn, (req, res) => {
-  res.render('dashboard', { user: req.user });
+  res.send(`Welcome ${req.user.Username}`);
 });
 
-// logout
+// Logout
 app.get('/logout', (req, res) =>
   req.logout(() => res.redirect('/'))
 );
 
-// start
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
