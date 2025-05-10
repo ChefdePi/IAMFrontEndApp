@@ -1,10 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Dashboard</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css"/>
+  <link
+    rel="stylesheet"
+    href="https://use.fontawesome.com/releases/v5.15.4/css/all.css"
+    integrity="sha384-dyZ88mC6Up2uqS4h/K1aF1a63eTvT4lQZl5kJYC+6uI1Pj+VXlQf1/j0v6dZEluv"
+    crossorigin="anonymous"
+  />
 </head>
 <body>
 
@@ -22,7 +28,7 @@
   <section class="main-content">
     <div class="container">
 
-      <% if (!user.profileComplete) { %>
+      <% if (!user.profile_complete) { %>
         <div class="banner warn">
           Please complete your profile → <a href="/complete-profile">click here</a>.
         </div>
@@ -30,13 +36,15 @@
 
       <h2>Your Dashboard</h2>
       <p>Welcome, <strong><%= user.Username %></strong>!</p>
+      <p>Email: <%= user.Email %></p>
+      <p>Permissions: <%= user.perms.length 
+           ? user.perms.join(', ') 
+           : '(none)' %>
+      </p>
 
-      <!-- your real dashboard links/widgets go here -->
       <ul class="dashboard-links">
         <li><a href="/protected">View Protected Content</a></li>
-        <!-- …etc… -->
       </ul>
-
     </div>
   </section>
 

@@ -34,51 +34,55 @@ app.use(session({
   resave:            false,
   saveUninitialized: false,
   cookie: {
-    secure:   true,    // Azure requires HTTPS
+    secure:   true,
     sameSite: 'Lax',
-    maxAge:   1000 * 60 * 30  // 30 minutes
+    maxAge:   1000 * 60 * 30
   }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ─── Mount the signup‐completion routes ──────────────────────────────
+// ─── Mount signup‐completion routes ─────────────────────────────────
 app.use('/', signupRouter);
+
+// ─── Helper to guard routes ─────────────────────────────────────────
+function ensureLoggedIn(req, res, next) {
+  if (!req.isAuthenticated()) return res.redirect('/login');
+  next();
+}
 
 // ─── Azure B2C OIDC Strategy ────────────────────────────────────────
 passport.use('azuread-openidconnect', new OIDCStrategy({
-    identityMetadata:  `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
-                       `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
-                       `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
-    clientID:          process.env.AZURE_AD_B2C_CLIENT_ID,
-    clientSecret:      process.env.AZURE_AD_B2C_CLIENT_SECRET,
-    redirectUrl:       redirectUri,
-    responseType:      'code',
-    responseMode:      'query',
-    scope:             ['openid','profile','email','offline_access'],
+    identityMetadata: `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
+                      `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
+                      `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
+    clientID:       process.env.AZURE_AD_B2C_CLIENT_ID,
+    clientSecret:   process.env.AZURE_AD_B2C_CLIENT_SECRET,
+    redirectUrl:    redirectUri,
+    responseType:   'code',
+    responseMode:   'query',
+    scope:          ['openid','profile','email','offline_access'],
     allowHttpForRedirectUrl: host.startsWith('http://'),
-    validateIssuer:    false
+    validateIssuer: false
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
-      // 1) Extract email from whatever claim it lives in
+      // 1) Extract email
       let email =
            profile?.emails?.[0]
         || profile?._json?.emails?.[0]
         || profile?._json?.email
         || profile?.upn
         || null;
-
       if (!email) {
         console.warn('⚠️ No email in token; falling back to sub:', profile.sub);
         email = `${profile.sub}@no-email.local`;
       }
       profile.Email = email;
-
       const name = profile.displayName || email.split('@')[0];
 
-      // 2) Ensure there’s a “shell” row in users
+      // 2) Upsert shell user
       await pool.execute(
         `INSERT INTO users (Username, Email)
            VALUES (?, ?)
@@ -86,18 +90,16 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         [name, email]
       );
 
-      // 3) Check whether they’ve completed their profile
+      // 3) Check profile completeness
       const [[u]] = await pool.execute(
-        `SELECT UserID, profile_complete 
-           FROM users 
-          WHERE Email = ?`,
+        `SELECT UserID, profile_complete FROM users WHERE Email = ?`,
         [email]
       );
       profile.UserID           = u.UserID;
       profile.profile_complete = u.profile_complete === 1;
       profile.Username         = name;
 
-      // 4) If they *have* completed, load their permissions
+      // 4) If complete, load permissions
       if (profile.profile_complete) {
         const [rows] = await pool.execute(`
           SELECT p.PermissionName
@@ -117,7 +119,6 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         complete: profile.profile_complete
       });
       done(null, profile);
-
     } catch (err) {
       console.error('🔴 Auth callback error', err);
       done(err);
@@ -129,8 +130,11 @@ passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
 // ─── ROUTES ──────────────────────────────────────────────────────────
-// Home
+
+// Home – public landing
 app.get('/', (req, res) => {
+  // Optionally redirect logged-in users straight to dashboard:
+  // if (req.isAuthenticated()) return res.redirect('/dashboard');
   res.render('home', { user: req.user });
 });
 
@@ -143,18 +147,21 @@ app.get('/login',
 app.get(callbackPath,
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   (req, res) => {
-    // If they haven’t filled out profile yet, send them there…
+    // New users → signup; others → dashboard
     if (!req.user.profile_complete) {
       return res.redirect('/complete-profile');
     }
-    // Otherwise let them into the protected area
-    res.redirect('/protected');
+    res.redirect('/dashboard');
   }
 );
 
-// Protected page
-app.get('/protected', (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect('/login');
+// Dashboard – user’s home after login
+app.get('/dashboard', ensureLoggedIn, (req, res) => {
+  res.render('dashboard', { user: req.user });
+});
+
+// Protected example
+app.get('/protected', ensureLoggedIn, (req, res) => {
   res.send(`
     <h1>Welcome, ${req.user.Username}</h1>
     <p>Email: ${req.user.Email}</p>
