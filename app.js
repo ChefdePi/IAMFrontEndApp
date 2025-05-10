@@ -48,49 +48,31 @@ app.use(passport.session());
 // ─── Mount signup‐completion routes ─────────────────────────────────
 app.use('/', signupRouter);
 
-// ─── Helper to guard routes ───────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────
 function ensureLoggedIn(req, res, next) {
   if (!req.isAuthenticated()) return res.redirect('/login');
   next();
 }
-// Only allow users with a specific role
 function requireRole(role) {
   return (req, res, next) => {
     if (!req.isAuthenticated()) {
       return res.redirect('/login');
     }
-    // req.user.role comes from your DB
     if (req.user.role === role) {
       return next();
     }
-    // Not authorized
     res.status(403).render('forbidden', { user: req.user });
   };
 }
-// Admin UI: list & approve pending users
-app.get('/admin/users', requireRole('admin'), async (req, res, next) => {
-  try {
-    const [users] = await pool.execute(`
-      SELECT UserID, Email, first_name, last_name, role, profile_complete
-        FROM users
-       WHERE profile_complete = 0
-    `);
-    res.render('admin-users', { user: req.user, pending: users });
-  } catch (err) {
-    next(err);
-  }
-});
 
 // ─── Azure B2C OIDC Strategy ────────────────────────────────────────
 const tenant = process.env.AZURE_AD_B2C_TENANT;
-const policy = process.env.AZURE_AD_B2C_POLICY;  // e.g. "B2C_1_signin_signup"
+const policy = process.env.AZURE_AD_B2C_POLICY;  // must match e.g. "B2C_1_signin_signup"
 
 passport.use('azuread-openidconnect', new OIDCStrategy({
-    // Policy‐specific metadata (absolute URLs)
     identityMetadata:
       `https://${tenant}.b2clogin.com/${tenant}.onmicrosoft.com/` +
-      `${policy}/v2.0/.well-known/openid-configuration` +
-      `?p=${policy}`,
+      `${policy}/v2.0/.well-known/openid-configuration?p=${policy}`,
     clientID:               process.env.AZURE_AD_B2C_CLIENT_ID,
     clientSecret:           process.env.AZURE_AD_B2C_CLIENT_SECRET,
     redirectUrl:            redirectUri,
@@ -102,7 +84,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
-      // 1) Extract or synthesize an email
+      // Extract email
       let email =
            profile?.emails?.[0]
         || profile?._json?.emails?.[0]
@@ -113,10 +95,10 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         console.warn('⚠️ No email claim; falling back to sub:', profile.sub);
         email = `${profile.sub}@no-email.local`;
       }
-      profile.Email = email;
+      profile.Email    = email;
       profile.Username = profile.displayName || email.split('@')[0];
 
-      // 2) Upsert a “shell” user record
+      // Upsert shell user
       await pool.execute(
         `INSERT INTO users (Username, Email)
            VALUES (?, ?)
@@ -124,40 +106,32 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         [profile.Username, email]
       );
 
-      // 3) Fetch completion flag
+      // Fetch completion flag
       const [[u]] = await pool.execute(
-        `SELECT UserID, profile_complete
-           FROM users
-          WHERE Email = ?`,
+        `SELECT UserID, profile_complete FROM users WHERE Email = ?`,
         [email]
       );
       profile.UserID           = u.UserID;
       profile.profile_complete = u.profile_complete === 1;
-      profile.profileComplete  = u.profile_complete === 1;  // camelCase for your EJS
+      profile.profileComplete  = u.profile_complete === 1;  // camelCase for EJS
 
-      // 4) Load permissions if they’ve completed
+      // Load perms if complete
       if (profile.profileComplete) {
         const [rows] = await pool.execute(`
           SELECT p.PermissionName
             FROM permissions p
             JOIN rolepermissions rp ON rp.PermissionID = p.PermissionID
             JOIN userroles ur       ON ur.RoleID       = rp.RoleID
-           WHERE ur.UserID = ?
-        `, [u.UserID]);
+           WHERE ur.UserID = ?`,
+          [u.UserID]
+        );
         profile.perms = rows.map(r => r.PermissionName);
       } else {
         profile.perms = [];
       }
 
-      console.log('→ Auth OK:', {
-        email:    profile.Email,
-        userId:   profile.UserID,
-        complete: profile.profileComplete
-      });
       done(null, profile);
-
     } catch (err) {
-      console.error('🔴 Auth callback error', err);
       done(err);
     }
   }
@@ -167,20 +141,10 @@ passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
 // ─── ROUTES ──────────────────────────────────────────────────────────
-
-// Public Home
-app.get('/', (req, res) => {
-  res.render('home', { user: req.user });
-});
-
-// Kick off login
-app.get('/login',
-  passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
-);
-
-// Callback from B2C
+app.get('/',        (req, res) => res.render('home',      { user: req.user }));
+app.get('/login',   passport.authenticate('azuread-openidconnect',{ failureRedirect: '/' }));
 app.get(callbackPath,
-  passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
+  passport.authenticate('azuread-openidconnect',{ failureRedirect: '/' }),
   (req, res) => {
     if (!req.user.profileComplete) {
       return res.redirect('/complete-profile');
@@ -188,15 +152,22 @@ app.get(callbackPath,
     res.redirect('/dashboard');
   }
 );
+app.get('/dashboard', ensureLoggedIn, (req, res) => res.render('dashboard',{ user: req.user }));
+app.get('/protected', ensureLoggedIn, (req, res) => res.render('protected',{ user: req.user }));
+app.get('/profile',   ensureLoggedIn, (req, res) => res.render('profile',  { user: req.user }));
 
-// Dashboard (protected)
-app.get('/dashboard', ensureLoggedIn, (req, res) => {
-  res.render('dashboard', { user: req.user });
-});
-
-// Protected demo
-app.get('/protected', ensureLoggedIn, (req, res) => {
-  res.render('protected', { user: req.user });
+// Admin UI
+app.get('/admin/users', requireRole('admin'), async (req, res, next) => {
+  try {
+    const [users] = await pool.execute(`
+      SELECT UserID, Email, first_name, last_name, role, profile_complete
+        FROM users
+       WHERE profile_complete = 0
+    `);
+    res.render('admin-users', { user: req.user, pending: users });
+  } catch (err) {
+    next(err);
+  }
 });
 app.post('/admin/users/approve', requireRole('admin'),
   express.urlencoded({ extended: false }), async (req, res, next) => {
@@ -211,25 +182,21 @@ app.post('/admin/users/approve', requireRole('admin'),
     }
 });
 
-// Logout – clear session + redirect to B2C sign-out
+// Logout
 app.get('/logout', (req, res, next) => {
   req.logout(err => {
     if (err) return next(err);
     req.session.destroy(err => {
       if (err) return next(err);
       res.clearCookie('connect.sid', { path: '/' });
-
-      const postLogout = encodeURIComponent(host);
+      const post = encodeURIComponent(host);
       const signOutUrl =
         `https://${tenant}.b2clogin.com/` +
         `${tenant}.onmicrosoft.com/${policy}/oauth2/v2.0/logout` +
-        `?p=${policy}` +
-        `&post_logout_redirect_uri=${postLogout}`;
-
+        `?p=${policy}&post_logout_redirect_uri=${post}`;
       res.redirect(signOutUrl);
     });
   });
 });
 
-// Start server
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));

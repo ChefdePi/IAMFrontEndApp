@@ -1,22 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Protected Content</title>
-  <link rel="stylesheet" href="/styles.css" />
-  <link
-    rel="stylesheet"
-    href="https://use.fontawesome.com/releases/v5.15.4/css/all.css"
-    integrity="sha384-dyZ88mC6Up2uqS4h/K1aF1a63eTvT4lQZl5kJYC+6uI1Pj+VXlQf1/j0v6dZEluv"
-    crossorigin="anonymous"
-  />
+  <link rel="stylesheet" href="/styles.css"/>
 </head>
 <body>
-
   <header>
     <div class="container">
-      <h1><i class="fas fa-lock"></i> SecureIAM</h1>
+      <h1>SecureIAM</h1>
       <nav>
         <a href="/">Home</a>
         <a href="/dashboard">Dashboard</a>
@@ -30,7 +23,6 @@
       <h2>Protected Content</h2>
       <p>Welcome, <strong><%= user.Username %></strong>!</p>
       <p>This page is only visible to authenticated users.</p>
-      <!-- add whatever protected widgets or data you need here -->
     </div>
   </section>
 
@@ -39,6 +31,5 @@
       <p>&copy; 2025 SecureIAM. All rights reserved.</p>
     </div>
   </footer>
-
 </body>
 </html>

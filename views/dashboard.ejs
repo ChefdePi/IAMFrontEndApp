@@ -46,15 +46,12 @@
         <% if (user.role === 'admin') { %>
           <li><a href="/admin/users">Review New Users</a></li>
         <% } %>
-
-        <% if (user.role === 'editor' || user.role === 'admin') { %>
+        <% if (['editor','admin'].includes(user.role)) { %>
           <li><a href="/posts">Create / Edit Posts</a></li>
         <% } %>
-
-        <% if (user.role === 'viewer' || user.role === 'admin') { %>
+        <% if (['viewer','admin'].includes(user.role)) { %>
           <li><a href="/reports">View Reports</a></li>
         <% } %>
-
         <li><a href="/profile">My Profile</a></li>
         <li><a href="/protected">Sample Protected Page</a></li>
       </ul>

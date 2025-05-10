@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>My Profile</title>
+  <link rel="stylesheet" href="/styles.css"/>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>SecureIAM</h1>
+      <nav>
+        <a href="/">Home</a>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/logout">Logout</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="main-content">
+    <div class="container">
+      <h2>My Profile</h2>
+      <p><strong>Email:</strong> <%= user.Email %></p>
+      <p><strong>First Name:</strong> <%= user.first_name || '(not set)' %></p>
+      <p><strong>Last Name:</strong>  <%= user.last_name  || '(not set)' %></p>
+      <p><strong>Role:</strong>       <%= user.role       || '(not set)' %></p>
+      <p><strong>Completed:</strong>  <%= user.profileComplete ? 'Yes' : 'No' %></p>
+      <% if (!user.profileComplete) { %>
+        <a href="/complete-profile" class="btn">Finish Your Profile</a>
+      <% } else { %>
+        <a href="/complete-profile" class="btn">Edit Profile</a>
+      <% } %>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>&copy; 2025 SecureIAM. All rights reserved.</p>
+    </div>
+  </footer>
+</body>
+</html>
