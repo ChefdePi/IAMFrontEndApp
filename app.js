@@ -17,6 +17,9 @@ const morgan           = require('morgan');
 const path             = require('path');
 const mysql            = require('mysql2/promise');
 
+// Import the signup routes for profile completion
+const signupRouter     = require('./routes/signup');
+
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
@@ -51,13 +54,25 @@ app.use(morgan('dev'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ─── Secure Session Cookies ─────────────────────────────────────────────────
+app.set('trust proxy', 1);  // required on Azure App Service
 app.use(session({
-  secret:            'your-session-secret',
-  resave:            false,
-  saveUninitialized: false
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: true,         // only send cookie over HTTPS
+    sameSite: 'lax',      // helps prevent CSRF
+    maxAge: 30 * 60 * 1000 // 30 minutes
+  }
 }));
+
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Mount the signup routes for profile completion
+app.use(signupRouter);
 
 // ─── Simple Test Route ──────────────────────────────────────────────────────
 app.get('/hello', (_, res) => res.send('Hello world'));
@@ -90,7 +105,7 @@ const azureStrategy = new OIDCStrategy(
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
-      // Upsert user
+      // Upsert user (shell record if new)
       const email = profile.emails[0];
       const name  = profile.displayName || email.split('@')[0];
       await pool.execute(
@@ -118,6 +133,8 @@ const azureStrategy = new OIDCStrategy(
       );
 
       profile.dbId  = u.UserID;
+      profile.UserID = u.UserID;                    // for callback logic
+      profile.Username = name;                      // for deserialize
       profile.perms = rows.map(r => r.PermissionName);
       console.log(`→ user ${email} (id=${u.UserID}) perms:`, profile.perms);
 
@@ -155,16 +172,31 @@ app.get('/login',
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
 
-// Callback handler
+// Callback handler – tag new users as incomplete, then go to dashboard
 app.get(callbackPath,
   (req, _res, next) => { console.log('→ [callback] query =', req.query); next(); },
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
-  (req, res) => res.redirect('/protected')
+  async (req, res) => {
+    // Check profile_complete in DB
+    const [[row]] = await pool.execute(
+      'SELECT profile_complete FROM users WHERE UserID = ?',
+      [req.user.UserID]
+    );
+    req.user.profileComplete = !!row.profile_complete;
+
+    // Redirect to dashboard
+    res.redirect('/dashboard');
+  }
 );
 
-// Protected page
-app.get('/protected', (req, res) => {
+// Dashboard – show banner if profile incomplete
+app.get('/dashboard', (req, res) => {
   if (!req.isAuthenticated()) return res.redirect('/login');
+  res.render('dashboard', { user: req.user });
+});
+
+// Protected page example
+app.get('/protected', needPerm('ViewDashboard'), (req, res) => {
   res.send(`
     <h1>Welcome, ${req.user.Username}</h1>
     <p>Perms: ${req.user.perms.join(', ') || '(none)'}</p>
@@ -172,9 +204,10 @@ app.get('/protected', (req, res) => {
   `);
 });
 
-// Sample extra routes
-app.get('/dashboard',    needPerm('ViewDashboard'),    (_, res) => res.send('<h2>Dashboard…</h2>'));
-app.post('/tasks/update', needPerm('UpdateCareTasks'), (_, res) => res.json({ ok: true }));
+// Sample extra route
+app.post('/tasks/update', needPerm('UpdateCareTasks'), (_, res) => {
+  res.json({ ok: true });
+});
 
 // Logout
 app.get('/logout', (req, res, next) =>
