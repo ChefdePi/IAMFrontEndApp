@@ -7,20 +7,15 @@
   <link rel="stylesheet" href="/styles.css"/>
 </head>
 <body>
-
-  <!-- only this: -->
   <%- include('partials/header', { user: user }) %>
 
   <section class="main-content">
     <div class="container">
       <h2>Post Management</h2>
       <p>This page is for <strong>Editor</strong> and <strong>Admin</strong> roles only.</p>
-      <!-- Put your post-editing UI here -->
     </div>
   </section>
 
-  <!-- and this: -->
   <%- include('partials/footer') %>
-
 </body>
 </html>
