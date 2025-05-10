@@ -2,14 +2,13 @@ const express = require('express');
 const pool    = require('../db');
 const router  = express.Router();
 
-function ensureLoggedIn(req, res, next) {
-  if (!req.isAuthenticated()) return res.redirect('/login');
-  next();
-}
-
-router.get('/complete-profile', ensureLoggedIn, (req, res) => {
+// Show the “finish your profile” form
+router.get('/complete-profile', (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.redirect('/login');
+  }
   res.render('complete-profile', {
-    email:     req.user.Email || req.user.email,
+    email:     req.user.Email,
     firstName: '',
     lastName:  '',
     role:      '',
@@ -17,18 +16,28 @@ router.get('/complete-profile', ensureLoggedIn, (req, res) => {
   });
 });
 
-router.post('/complete-profile', ensureLoggedIn, async (req, res) => {
+// Handle the form POST
+router.post('/complete-profile', async (req, res, next) => {
+  if (!req.isAuthenticated()) {
+    return res.redirect('/login');
+  }
+
   const { firstName, lastName, role } = req.body;
-  if (!firstName || !lastName || !['Caregiver','FamilyMember'].includes(role)) {
+  // Validate: you can adjust the allowed roles as needed
+  if (
+    !firstName ||
+    !lastName ||
+    !['unapproved','viewer','editor','admin'].includes(role)
+  ) {
     return res.render('complete-profile', {
-      email:     req.user.Email || req.user.email,
+      email:     req.user.Email,
       error:     'All fields are required and role must be valid.',
       firstName, lastName, role
     });
   }
 
   try {
-    // Update profile and mark complete
+    // Update their profile and flip on “complete”
     await pool.execute(
       `UPDATE users
          SET first_name      = ?,
@@ -38,16 +47,12 @@ router.post('/complete-profile', ensureLoggedIn, async (req, res) => {
        WHERE UserID = ?`,
       [firstName, lastName, role, req.user.UserID]
     );
-    // optional audit trail
-    await pool.execute(
-      `INSERT INTO audit_log (UserID, Action) VALUES (?, 'ProfileCompleted')`,
-      [req.user.UserID]
-    );
-    res.redirect('/dashboard');
+    // Redirect into the protected area
+    res.redirect('/protected');
   } catch (err) {
     console.error(err);
     res.render('complete-profile', {
-      email:     req.user.Email || req.user.email,
+      email:     req.user.Email,
       error:     'Server error – please try again.',
       firstName, lastName, role
     });

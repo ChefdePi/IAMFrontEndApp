@@ -1,44 +1,37 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="utf-8">
   <title>Complete Your Profile</title>
-  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-
-  <header>…</header>
-
-  <section class="main-content">
-    <div class="container">
-      <h2>Complete Your Profile</h2>
-      <% if (error) { %>
-        <p class="error"><%= error %></p>
-      <% } %>
-      <form method="POST">
-        <label>First Name:<br>
-          <input name="firstName" value="<%= firstName %>" required>
-        </label><br><br>
-
-        <label>Last Name:<br>
-          <input name="lastName" value="<%= lastName %>" required>
-        </label><br><br>
-
-        <label>Role:<br>
-          <select name="role" required>
-            <option value="">-- Select Role --</option>
-            <option value="Caregiver"    <%= role==='Caregiver'    ? 'selected' : '' %>>Caregiver</option>
-            <option value="FamilyMember" <%= role==='FamilyMember' ? 'selected' : '' %>>Family Member</option>
-          </select>
-        </label><br><br>
-
-        <button type="submit">Save Profile</button>
-      </form>
-    </div>
-  </section>
-
-  <footer>…</footer>
-
+  <h1>Complete Your Profile</h1>
+  <p>Email: <%= email %></p>
+  <form method="POST" action="/complete-profile">
+    <label>
+      First Name:<br>
+      <input type="text" name="firstName" value="<%= firstName %>" required>
+    </label>
+    <br><br>
+    <label>
+      Last Name:<br>
+      <input type="text" name="lastName" value="<%= lastName %>" required>
+    </label>
+    <br><br>
+    <label>
+      Role:<br>
+      <select name="role" required>
+        <option value="">Select a role</option>
+        <option value="viewer">Viewer</option>
+        <option value="editor">Editor</option>
+        <option value="admin">Admin</option>
+      </select>
+    </label>
+    <br><br>
+    <button type="submit">Finish Registration</button>
+    <% if (error) { %>
+      <p style="color:red"><%= error %></p>
+    <% } %>
+  </form>
 </body>
 </html>

@@ -11,7 +11,7 @@ const signupRouter     = require('./routes/signup');
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
-// ─── Build redirectUri ───────────────────────────────────────────────────────
+// ─── Build redirectUri ────────────────────────────────────────────────
 const rawHost      = process.env.PUBLIC_HOST || '';
 const host         = rawHost.startsWith('http') ? rawHost : `https://${rawHost}`;
 const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
@@ -20,14 +20,14 @@ const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
 const redirectUri  = `${host}${callbackPath}`;
 console.log('→ Using redirectUri:', redirectUri);
 
-// ─── Express / EJS / Static ─────────────────────────────────────────────────
+// ─── Express / EJS / Static ──────────────────────────────────────────
 app.use(morgan('dev'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.urlencoded({ extended: true }));
 
-// ─── Secure Session Cookies ─────────────────────────────────────────────────
+// ─── Secure Session Cookies ──────────────────────────────────────────
 app.set('trust proxy', 1);
 app.use(session({
   secret:            process.env.SESSION_SECRET || 'fallback-secret-9876',
@@ -35,7 +35,7 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     secure:   true,    // Azure requires HTTPS
-    sameSite: 'Lax',   // CSRF protection
+    sameSite: 'Lax',
     maxAge:   1000 * 60 * 30  // 30 minutes
   }
 }));
@@ -43,10 +43,10 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ─── Mount profile‐completion routes ────────────────────────────────────────
-app.use(signupRouter);
+// ─── Mount the signup‐completion routes ──────────────────────────────
+app.use('/', signupRouter);
 
-// ─── Azure B2C OIDC Strategy ───────────────────────────────────────────────
+// ─── Azure B2C OIDC Strategy ────────────────────────────────────────
 passport.use('azuread-openidconnect', new OIDCStrategy({
     identityMetadata:  `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
                        `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
@@ -62,25 +62,23 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
-      // ── 1) Pull email out of whatever claim we got ─────────────────────────
+      // 1) Extract email from whatever claim it lives in
       let email =
-           profile?.emails?.[0]             // if Azure put it under .emails
-        || profile?._json?.emails?.[0]      // or ._json.emails
-        || profile?._json?.email            // or a single .email claim
-        || profile?.upn                     // or UPN
+           profile?.emails?.[0]
+        || profile?._json?.emails?.[0]
+        || profile?._json?.email
+        || profile?.upn
         || null;
 
-      // If you still don’t have an email, *synthesize* one from the sub:
       if (!email) {
-        console.warn('⚠️ No email in ID token; falling back to sub:', profile.sub);
+        console.warn('⚠️ No email in token; falling back to sub:', profile.sub);
         email = `${profile.sub}@no-email.local`;
       }
-
-      // attach to profile
       profile.Email = email;
-      const name    = profile.displayName || email.split('@')[0];
 
-      // ── 2) Upsert your user shell ────────────────────────────────────────
+      const name = profile.displayName || email.split('@')[0];
+
+      // 2) Ensure there’s a “shell” row in users
       await pool.execute(
         `INSERT INTO users (Username, Email)
            VALUES (?, ?)
@@ -88,30 +86,38 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         [name, email]
       );
 
-      // fetch UserID & perms
-      const [[u]]   = await pool.execute(`SELECT UserID FROM users WHERE Email = ?`, [email]);
-      const [rows]  = await pool.execute(`
-        SELECT p.PermissionName
-          FROM permissions p
-          JOIN rolepermissions rp ON rp.PermissionID = p.PermissionID
-          JOIN userroles ur       ON ur.RoleID       = rp.RoleID
-         WHERE ur.UserID = ?`,
-        [u.UserID]
+      // 3) Check whether they’ve completed their profile
+      const [[u]] = await pool.execute(
+        `SELECT UserID, profile_complete 
+           FROM users 
+          WHERE Email = ?`,
+        [email]
       );
+      profile.UserID           = u.UserID;
+      profile.profile_complete = u.profile_complete === 1;
+      profile.Username         = name;
 
-      profile.dbId     = u.UserID;
-      profile.UserID   = u.UserID;
-      profile.Username = name;
-      profile.perms    = rows.map(r => r.PermissionName);
+      // 4) If they *have* completed, load their permissions
+      if (profile.profile_complete) {
+        const [rows] = await pool.execute(`
+          SELECT p.PermissionName
+            FROM permissions p
+            JOIN rolepermissions rp ON rp.PermissionID = p.PermissionID
+            JOIN userroles ur       ON ur.RoleID       = rp.RoleID
+           WHERE ur.UserID = ?
+        `, [u.UserID]);
+        profile.perms = rows.map(r => r.PermissionName);
+      } else {
+        profile.perms = [];
+      }
 
-      console.log('→ Auth Success – Profile:', {
-        email: profile.Email,
-        dbId:  profile.dbId,
-        perms: profile.perms
+      console.log('→ Auth OK:', {
+        email:    profile.Email,
+        userId:   profile.UserID,
+        complete: profile.profile_complete
       });
-
-      // ── 3) Tell Passport “we’re good” ───────────────────────────────────
       done(null, profile);
+
     } catch (err) {
       console.error('🔴 Auth callback error', err);
       done(err);
@@ -119,40 +125,40 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
   }
 ));
 
-// ─── Sessions ────────────────────────────────────────────────────────────────
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
-// ─── ROUTES ──────────────────────────────────────────────────────────────────
-
+// ─── ROUTES ──────────────────────────────────────────────────────────
 // Home
 app.get('/', (req, res) => {
   res.render('home', { user: req.user });
 });
 
-// Kick off login
+// Kick off B2C login
 app.get('/login',
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
 
-// CB – on return from Azure B2C
+// Callback from B2C
 app.get(callbackPath,
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   (req, res) => {
-    console.log('✅ PASSED AUTH CALLBACK – user:', req.user.Username, req.user.Email);
-    // now that we’re actually authenticated, go see the protected page
+    // If they haven’t filled out profile yet, send them there…
+    if (!req.user.profile_complete) {
+      return res.redirect('/complete-profile');
+    }
+    // Otherwise let them into the protected area
     res.redirect('/protected');
   }
 );
 
-// Protected example
+// Protected page
 app.get('/protected', (req, res) => {
-  console.log('→ Protected Route – req.isAuthenticated? →', req.isAuthenticated());
   if (!req.isAuthenticated()) return res.redirect('/login');
   res.send(`
     <h1>Welcome, ${req.user.Username}</h1>
-    <p>Your email: ${req.user.Email}</p>
-    <p>Perms: ${req.user.perms.join(', ') || '(none)'}</p>
+    <p>Email: ${req.user.Email}</p>
+    <p>Permissions: ${req.user.perms.join(', ') || '(none)'}</p>
     <a href="/logout">Logout</a>
   `);
 });
@@ -162,5 +168,5 @@ app.get('/logout', (req, res, next) =>
   req.logout(err => err ? next(err) : res.redirect('/'))
 );
 
-// Start the server
+// Start server
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
