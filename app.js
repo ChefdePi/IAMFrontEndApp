@@ -57,7 +57,7 @@ passport.use(new OIDCStrategy({
     redirectUrl:             redirectUri,
     responseType:            'code',
     responseMode:            'query',
-    scope:                   ['openid','profile','offline_access'],
+    scope: ['openid','profile','email','offline_access'],
     allowHttpForRedirectUrl: host.startsWith('http://'),
     validateIssuer:          false
   },
