@@ -1,17 +1,16 @@
-// db.js  — light-weight wrapper around mysql2/promise
+// db.js
 require('dotenv').config();
 const mysql = require('mysql2/promise');
 
 const pool = mysql.createPool({
-  host:     process.env.MYSQL_HOST,
-  user:     process.env.MYSQL_USER,
-  password: process.env.MYSQL_PASSWORD,
-  database: process.env.MYSQL_DB,
+  host:               process.env.MYSQL_HOST,
+  user:               process.env.MYSQL_USER,
+  password:           process.env.MYSQL_PASSWORD,
+  database:           process.env.MYSQL_DB,
+  port:               parseInt(process.env.MYSQL_PORT, 10) || 3306,
   waitForConnections: true,
-  connectionLimit: 4,
-  ssl: {                     // ← you got TLS working already
-    rejectUnauthorized: true // use the Baltimore root if you like
-  }
+  connectionLimit:    10,
+  ssl:                { rejectUnauthorized: true }
 });
 
 module.exports = pool;

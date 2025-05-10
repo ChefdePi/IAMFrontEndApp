@@ -17,12 +17,15 @@ const morgan           = require('morgan');
 const path             = require('path');
 const mysql            = require('mysql2/promise');
 
+// ← centralized pool
+const pool         = require('./db');
+// ← profile‐completion routes
+const signupRouter = require('./routes/signup');
+
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
-// ─── Redirect URI ───────────────────────────────────────────────────────────
-// Build either http://localhost:3000/auth/openid/return or
-// https://<YOUR_APP>.azurewebsites.net/auth/openid/return
+// ─── Build redirectUri ──────────────────────────────────────────────────────
 const rawHost      = process.env.PUBLIC_HOST || '';
 const host         = rawHost.startsWith('http')
                      ? rawHost
@@ -31,38 +34,38 @@ const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
                      ? process.env.CALLBACK_PATH
                      : `/${process.env.CALLBACK_PATH}`;
 const redirectUri  = `${host}${callbackPath}`;
-
 console.log('→ Using redirectUri:', redirectUri);
 
-// ─── MySQL Pool ─────────────────────────────────────────────────────────────
-const pool = mysql.createPool({
-  host:               process.env.AZURE_MYSQL_HOST,
-  user:               process.env.AZURE_MYSQL_USERNAME,
-  password:           process.env.AZURE_MYSQL_PASSWORD,
-  database:           process.env.AZURE_MYSQL_DBNAME,
-  port:               parseInt(process.env.AZURE_MYSQL_PORT, 10) || 3306,
-  waitForConnections: true,
-  connectionLimit:    10,
-  ssl:                { rejectUnauthorized: true }
-});
-
-// ─── Middleware / Views ─────────────────────────────────────────────────────
+// ─── Express / EJS / Static ─────────────────────────────────────────────────
 app.use(morgan('dev'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.urlencoded({ extended: true }));
+
+// ─── Secure Session Cookies ─────────────────────────────────────────────────
+app.set('trust proxy', 1);
 app.use(session({
-  secret:            'your-session-secret',
+  secret:            process.env.SESSION_SECRET,    // ← must be in Azure App Settings
   resave:            false,
-  saveUninitialized: false
+  saveUninitialized: false,
+  cookie: {
+    secure: true,
+    sameSite: 'lax',
+    maxAge: 30 * 60 * 1000
+  }
 }));
+
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ─── Simple Test Route ──────────────────────────────────────────────────────
+// ─── Mount signup routes ────────────────────────────────────────────────────
+app.use(signupRouter);
+
+// ─── Test route ─────────────────────────────────────────────────────────────
 app.get('/hello', (_, res) => res.send('Hello world'));
 
-// ─── Auth Helper ────────────────────────────────────────────────────────────
+// ─── RBAC helper ─────────────────────────────────────────────────────────────
 function needPerm(name) {
   return (req, res, next) => {
     if (!req.isAuthenticated?.() || !req.user?.perms?.includes(name)) {
@@ -72,25 +75,25 @@ function needPerm(name) {
   };
 }
 
-// ─── OIDC STRATEGY ──────────────────────────────────────────────────────────
-const azureStrategy = new OIDCStrategy(
+// ─── Azure B2C OIDC Strategy ─────────────────────────────────────────────────
+passport.use('azuread-openidconnect', new OIDCStrategy(
   {
     identityMetadata:
       `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
       `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
       `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
-    clientID:                  process.env.AZURE_AD_B2C_CLIENT_ID,
-    clientSecret:              process.env.AZURE_AD_B2C_CLIENT_SECRET,
-    redirectUrl:               redirectUri,
-    allowHttpForRedirectUrl:   host.startsWith('http://'),
-    responseType:              'code',
-    responseMode:              'query',
-    scope:                     ['openid','profile','offline_access'],
-    validateIssuer:            false
+    clientID:                process.env.AZURE_AD_B2C_CLIENT_ID,
+    clientSecret:            process.env.AZURE_AD_B2C_CLIENT_SECRET,
+    redirectUrl:             redirectUri,
+    allowHttpForRedirectUrl: host.startsWith('http://'),
+    responseType:            'code',
+    responseMode:            'query',
+    scope:                   ['openid','profile','offline_access'],
+    validateIssuer:          false
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
-      // Upsert user
+      // upsert shell user
       const email = profile.emails[0];
       const name  = profile.displayName || email.split('@')[0];
       await pool.execute(
@@ -100,71 +103,80 @@ const azureStrategy = new OIDCStrategy(
         [name, email]
       );
 
-      // Fetch UserID
-      const [[u]] = await pool.execute(
-        `SELECT UserID FROM users WHERE Email = ?`,
-        [email]
-      );
-      if (!u) throw new Error('User row missing after upsert');
+      // fetch id & perms
+      const [[u]]  = await pool.execute(`SELECT UserID FROM users WHERE Email = ?`, [email]);
+      const [rows] = await pool.execute(`
+        SELECT p.PermissionName
+          FROM permissions p
+          JOIN rolepermissions rp ON rp.PermissionID = p.PermissionID
+          JOIN userroles ur       ON ur.RoleID       = rp.RoleID
+         WHERE ur.UserID = ?
+      `, [u.UserID]);
 
-      // Load permissions
-      const [rows] = await pool.execute(
-        `SELECT p.PermissionName
-           FROM permissions p
-           JOIN rolepermissions rp ON rp.PermissionID = p.PermissionID
-           JOIN userroles ur       ON ur.RoleID       = rp.RoleID
-          WHERE ur.UserID = ?`,
-        [u.UserID]
-      );
+      profile.dbId     = u.UserID;
+      profile.UserID   = u.UserID;
+      profile.Username = name;
+      profile.perms    = rows.map(r => r.PermissionName);
 
-      profile.dbId  = u.UserID;
-      profile.perms = rows.map(r => r.PermissionName);
       console.log(`→ user ${email} (id=${u.UserID}) perms:`, profile.perms);
-
       done(null, profile);
     } catch (err) {
       console.error('Auth callback error:', err);
       done(err);
     }
   }
-);
-passport.use('azuread-openidconnect', azureStrategy);
+));
 
-// ─── Session Serialization ─────────────────────────────────────────────────
+// ─── Sessions ────────────────────────────────────────────────────────────────
 passport.serializeUser((user, done) => done(null, user.dbId));
 passport.deserializeUser(async (id, done) => {
   try {
     const [[row]] = await pool.execute(
-      `SELECT UserID, Username, Email FROM users WHERE UserID = ?`,
-      [id]
+      `SELECT UserID, Username, Email FROM users WHERE UserID = ?`, [id]
     );
     done(null, row || false);
-  } catch (err) {
-    done(err);
+  } catch (e) {
+    done(e);
   }
 });
 
-// ─── ROUTES ─────────────────────────────────────────────────────────────────
+// ─── ROUTES ──────────────────────────────────────────────────────────────────
 
-// Home (renders views/home.ejs)
+// home
 app.get('/', (req, res) => res.render('home', { user: req.user }));
 
-// Kick off login
+// kick off login
 app.get('/login',
   (req, _res, next) => { console.log('→ [login] redirectUri =', redirectUri); next(); },
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
 
-// Callback handler
+// **LOG & PROCEED** callback
 app.get(callbackPath,
   (req, _res, next) => { console.log('→ [callback] query =', req.query); next(); },
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
-  (req, res) => res.redirect('/protected')
+  async (req, res) => {
+    console.log('🔥 Entered post‐auth handler for userID=', req.user.UserID);
+
+    // load flag
+    const [[row]] = await pool.execute(
+      'SELECT profile_complete FROM users WHERE UserID = ?', [req.user.UserID]
+    );
+    console.log('🔥 profile_complete flag =', row.profile_complete);
+
+    req.user.profileComplete = !!row.profile_complete;
+    res.redirect('/dashboard');
+  }
 );
 
-// Protected page
-app.get('/protected', (req, res) => {
+// dashboard
+app.get('/dashboard', (req, res) => {
   if (!req.isAuthenticated()) return res.redirect('/login');
+  res.render('dashboard', { user: req.user });
+});
+
+// protected example
+app.get('/protected', needPerm('ViewDashboard'), (req, res) => {
   res.send(`
     <h1>Welcome, ${req.user.Username}</h1>
     <p>Perms: ${req.user.perms.join(', ') || '(none)'}</p>
@@ -172,14 +184,10 @@ app.get('/protected', (req, res) => {
   `);
 });
 
-// Sample extra routes
-app.get('/dashboard',    needPerm('ViewDashboard'),    (_, res) => res.send('<h2>Dashboard…</h2>'));
-app.post('/tasks/update', needPerm('UpdateCareTasks'), (_, res) => res.json({ ok: true }));
-
-// Logout
+// logout
 app.get('/logout', (req, res, next) =>
   req.logout(err => err ? next(err) : res.redirect('/'))
 );
 
-// ─── START ──────────────────────────────────────────────────────────────────
+// start
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
