@@ -151,23 +151,26 @@ app.get('/login',
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
 
-// **LOG & PROCEED** callback
-// ─── Callback handler – tag new users as incomplete, then go to dashboard
+// ─── CALLBACK HANDLER ────────────────────────────────────────────────────────
 app.get(callbackPath,
-  passport.authenticate('azuread-openidconnect',{ failureRedirect:'/' }),
-  async (req, res) => {
-    const [[row]] = await pool.execute(
-      'SELECT profile_complete FROM users WHERE UserID = ?',
-      [req.user.UserID]
-    );
-    req.user.profileComplete = !!row.profile_complete;
+  passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
+  async (req, res, next) => {
+    try {
+      // 1) load the profile_complete flag from MySQL
+      const [[row]] = await pool.execute(
+        'SELECT profile_complete FROM users WHERE UserID = ?',
+        [req.user.UserID]
+      );
+      const isComplete = !!row.profile_complete;
+      req.user.profileComplete = isComplete;
 
-    if (!req.user.profileComplete) {
-      // first‑time
-      return res.redirect('/complete-profile');
+      // 2) redirect new users to /complete-profile, others to /dashboard
+      return isComplete
+        ? res.redirect('/dashboard')
+        : res.redirect('/complete-profile');
+    } catch (err) {
+      next(err);
     }
-    // otherwise
-    res.redirect('/dashboard');
   }
 );
 

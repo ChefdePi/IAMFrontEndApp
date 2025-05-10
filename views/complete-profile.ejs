@@ -8,37 +8,28 @@
 </head>
 <body>
 
-  <header>
-    <div class="container">
-      <h1><i class="fas fa-lock"></i> SecureIAM</h1>
-      <nav>
-        <a href="/">Home</a>
-        <a href="/dashboard">Dashboard</a>
-        <a href="/logout">Logout</a>
-      </nav>
-    </div>
-  </header>
+  <header>…</header>
 
   <section class="main-content">
     <div class="container">
       <h2>Complete Your Profile</h2>
       <% if (error) { %>
-        <p style="color:red"><%= error %></p>
+        <p class="error"><%= error %></p>
       <% } %>
       <form method="POST">
         <label>First Name:<br>
-          <input name="firstName" value="<%= firstName||'' %>" required>
+          <input name="firstName" value="<%= firstName %>" required>
         </label><br><br>
 
         <label>Last Name:<br>
-          <input name="lastName" value="<%= lastName||'' %>" required>
+          <input name="lastName" value="<%= lastName %>" required>
         </label><br><br>
 
         <label>Role:<br>
           <select name="role" required>
             <option value="">-- Select Role --</option>
-            <option value="Caregiver" <%= role==='Caregiver'?'selected':'' %>>Caregiver</option>
-            <option value="FamilyMember" <%= role==='FamilyMember'?'selected':'' %>>Family Member</option>
+            <option value="Caregiver"    <%= role==='Caregiver'    ? 'selected' : '' %>>Caregiver</option>
+            <option value="FamilyMember" <%= role==='FamilyMember' ? 'selected' : '' %>>Family Member</option>
           </select>
         </label><br><br>
 
@@ -47,11 +38,7 @@
     </div>
   </section>
 
-  <footer>
-    <div class="container">
-      <p>&copy; 2025 SecureIAM. All rights reserved.</p>
-    </div>
-  </footer>
+  <footer>…</footer>
 
 </body>
 </html>

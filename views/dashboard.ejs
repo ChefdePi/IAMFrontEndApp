@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Complete Your Profile</title>
+  <title>Dashboard</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -21,50 +21,22 @@
 
   <section class="main-content">
     <div class="container">
-      <h2>Complete Your Profile</h2>
 
-      <!-- show the email coming in from req.user -->
-      <p>
-        <label>Email Address:<br>
-          <input type="email" value="<%= email %>" readonly>
-        </label>
-      </p>
-
-      <!-- any validation error -->
-      <% if (error) { %>
-        <p class="error"><%= error %></p>
+      <% if (!user.profileComplete) { %>
+        <div class="banner warn">
+          Please complete your profile → <a href="/complete-profile">click here</a>.
+        </div>
       <% } %>
 
-      <!-- profile form -->
-      <form method="POST" action="/complete-profile">
-        <p>
-          <label>First Name:<br>
-            <input name="firstName" value="<%= firstName||'' %>" required>
-          </label>
-        </p>
+      <h2>Your Dashboard</h2>
+      <p>Welcome, <strong><%= user.Username %></strong>!</p>
 
-        <p>
-          <label>Last Name:<br>
-            <input name="lastName" value="<%= lastName||'' %>" required>
-          </label>
-        </p>
+      <!-- your real dashboard links/widgets go here -->
+      <ul class="dashboard-links">
+        <li><a href="/protected">View Protected Content</a></li>
+        <!-- …etc… -->
+      </ul>
 
-        <p>
-          <label>Role:<br>
-            <select name="role" required>
-              <option value="">-- Select Role --</option>
-              <option value="Caregiver"   <%= role==='Caregiver'   ? 'selected' : '' %>>
-                Caregiver
-              </option>
-              <option value="FamilyMember" <%= role==='FamilyMember' ? 'selected' : '' %>>
-                Family Member
-              </option>
-            </select>
-          </label>
-        </p>
-
-        <button type="submit">Save Profile</button>
-      </form>
     </div>
   </section>
 
