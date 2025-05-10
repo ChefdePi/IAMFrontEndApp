@@ -92,16 +92,22 @@ passport.use('azuread-openidconnect', new OIDCStrategy(
     validateIssuer:          false
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
-    try {
-      // upsert shell user
-      const email = profile.emails[0];
-      const name  = profile.displayName || email.split('@')[0];
-      await pool.execute(
-        `INSERT INTO users (Username, Email)
-           VALUES (?, ?)
-           ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
-        [name, email]
-      );
+  try {
+    // pull the e-mail out…
+    const email = profile.emails[0];
+    // …and attach it to the profile object
+    profile.Email = email;
+
+    // derive a display name
+    const name  = profile.displayName || email.split('@')[0];
+
+    // now upsert into your users table
+    await pool.execute(
+      `INSERT INTO users (Username, Email)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
+      [name, email]
+    );
 
       // fetch id & perms
       const [[u]]  = await pool.execute(`SELECT UserID FROM users WHERE Email = ?`, [email]);
@@ -163,22 +169,28 @@ app.get(callbackPath,
       const isComplete = !!row.profile_complete;
       req.user.profileComplete = isComplete;
 
-      // DEBUG LOG
-      console.log(
-        `→ onboarding check: user=${req.user.Email} profile_complete=${row.profile_complete}`
-      );
+      // debug
+      console.log(`→ onboarding check: ${req.user.Email} profile_complete=${row.profile_complete}`);
 
-      // 2) route accordingly
-      if (!isComplete) {
-        return res.redirect('/complete-profile');
-      } else {
-        return res.redirect('/dashboard');
-      }
+      // 2) redirect new users → complete-profile, others → dashboard
+      return isComplete
+        ? res.redirect('/dashboard')
+        : res.redirect('/complete-profile');
     } catch (err) {
       next(err);
     }
   }
 );
+function ensureLoggedIn(req, res, next) {
+  if (!req.isAuthenticated()) return res.redirect('/login');
+  next();
+}
+
+app.get('/dashboard', ensureLoggedIn, (req, res) => {
+  // your home.ejs-like banner logic lives in dashboard.ejs
+  res.render('dashboard', { user: req.user });
+});
+
 
 
 // protected example
