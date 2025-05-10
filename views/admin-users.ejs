@@ -2,6 +2,9 @@
 <html>
 <head><title>Pending Users</title></head>
 <body>
+      <!-- only this: -->
+  <%- include('partials/header', { user: user }) %>
+
   <h1>Pending Profile Completions</h1>
   <table>
     <tr><th>Email</th><th>Name</th><th>Role</th><th>Action</th></tr>

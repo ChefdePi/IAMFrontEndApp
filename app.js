@@ -155,6 +155,21 @@ app.get(callbackPath,
 app.get('/dashboard', ensureLoggedIn, (req, res) => res.render('dashboard',{ user: req.user }));
 app.get('/protected', ensureLoggedIn, (req, res) => res.render('protected',{ user: req.user }));
 app.get('/profile',   ensureLoggedIn, (req, res) => res.render('profile',  { user: req.user }));
+// Posts (Editors + Admins)
+app.get('/posts', ensureLoggedIn, (req, res) => {
+  if (!['editor','admin'].includes(req.user.role)) {
+    return res.status(403).render('forbidden', { user: req.user });
+  }
+  res.render('posts', { user: req.user });
+});
+
+// Reports (Viewers + Admins)
+app.get('/reports', ensureLoggedIn, (req, res) => {
+  if (!['viewer','admin'].includes(req.user.role)) {
+    return res.status(403).render('forbidden', { user: req.user });
+  }
+  res.render('reports', { user: req.user });
+});
 
 // Admin UI
 app.get('/admin/users', requireRole('admin'), async (req, res, next) => {

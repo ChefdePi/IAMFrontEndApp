@@ -1,0 +1,24 @@
+<header>
+  <div class="container">
+    <h1><i class="fas fa-lock"></i> SecureIAM</h1>
+    <nav>
+      <a href="/">Home</a>
+      <% if (user) { %>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/profile">My Profile</a>
+        <% if (user.role === 'admin') { %>
+          <a href="/admin/users">Admin</a>
+        <% } %>
+        <% if (['editor','admin'].includes(user.role)) { %>
+          <a href="/posts">Posts</a>
+        <% } %>
+        <% if (['viewer','admin'].includes(user.role)) { %>
+          <a href="/reports">Reports</a>
+        <% } %>
+        <a href="/logout">Logout</a>
+      <% } else { %>
+        <a href="/login">Login</a>
+      <% } %>
+    </nav>
+  </div>
+</header>
