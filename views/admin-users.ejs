@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head><title>Pending Users</title></head>
+<body>
+  <h1>Pending Profile Completions</h1>
+  <table>
+    <tr><th>Email</th><th>Name</th><th>Role</th><th>Action</th></tr>
+    <% pending.forEach(u => { %>
+      <tr>
+        <td><%= u.Email %></td>
+        <td><%= u.first_name %> <%= u.last_name %></td>
+        <td><%= u.role %></td>
+        <td>
+          <form method="POST" action="/admin/users/approve">
+            <input type="hidden" name="id" value="<%= u.UserID %>"/>
+            <button type="submit">Approve</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+  </table>
+  <a href="/dashboard">Back</a>
+</body>
+</html>

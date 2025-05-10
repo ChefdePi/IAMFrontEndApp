@@ -53,6 +53,33 @@ function ensureLoggedIn(req, res, next) {
   if (!req.isAuthenticated()) return res.redirect('/login');
   next();
 }
+// Only allow users with a specific role
+function requireRole(role) {
+  return (req, res, next) => {
+    if (!req.isAuthenticated()) {
+      return res.redirect('/login');
+    }
+    // req.user.role comes from your DB
+    if (req.user.role === role) {
+      return next();
+    }
+    // Not authorized
+    res.status(403).render('forbidden', { user: req.user });
+  };
+}
+// Admin UI: list & approve pending users
+app.get('/admin/users', requireRole('admin'), async (req, res, next) => {
+  try {
+    const [users] = await pool.execute(`
+      SELECT UserID, Email, first_name, last_name, role, profile_complete
+        FROM users
+       WHERE profile_complete = 0
+    `);
+    res.render('admin-users', { user: req.user, pending: users });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ─── Azure B2C OIDC Strategy ────────────────────────────────────────
 const tenant = process.env.AZURE_AD_B2C_TENANT;
@@ -170,6 +197,18 @@ app.get('/dashboard', ensureLoggedIn, (req, res) => {
 // Protected demo
 app.get('/protected', ensureLoggedIn, (req, res) => {
   res.render('protected', { user: req.user });
+});
+app.post('/admin/users/approve', requireRole('admin'),
+  express.urlencoded({ extended: false }), async (req, res, next) => {
+    try {
+      await pool.execute(
+        `UPDATE users SET profile_complete = 1 WHERE UserID = ?`,
+        [req.body.id]
+      );
+      res.redirect('/admin/users');
+    } catch (err) {
+      next(err);
+    }
 });
 
 // Logout – clear session + redirect to B2C sign-out
