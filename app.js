@@ -152,28 +152,27 @@ app.get('/login',
 );
 
 // **LOG & PROCEED** callback
+// ─── Callback handler – tag new users as incomplete, then go to dashboard
 app.get(callbackPath,
-  (req, _res, next) => { console.log('→ [callback] query =', req.query); next(); },
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   async (req, res) => {
-    console.log('🔥 Entered post‐auth handler for userID=', req.user.UserID);
-
-    // load flag
+    // load profile_complete
     const [[row]] = await pool.execute(
-      'SELECT profile_complete FROM users WHERE UserID = ?', [req.user.UserID]
+      'SELECT profile_complete FROM users WHERE UserID = ?',
+      [req.user.UserID]
     );
-    console.log('🔥 profile_complete flag =', row.profile_complete);
-
     req.user.profileComplete = !!row.profile_complete;
+
+    // ← replace this line:
+    // res.redirect('/dashboard');
+
+    // ← with this:
+    if (!req.user.profileComplete) {
+      return res.redirect('/complete-profile');
+    }
     res.redirect('/dashboard');
   }
 );
-
-// dashboard
-app.get('/dashboard', (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect('/login');
-  res.render('dashboard', { user: req.user });
-});
 
 // protected example
 app.get('/protected', needPerm('ViewDashboard'), (req, res) => {
