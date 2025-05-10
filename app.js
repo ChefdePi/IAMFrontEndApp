@@ -11,9 +11,11 @@ const signupRouter     = require('./routes/signup');
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
-// ─── Build redirectUri ────────────────────────────────────────────────
+// ─── Build redirectUri & host ────────────────────────────────────────
 const rawHost      = process.env.PUBLIC_HOST || '';
-const host         = rawHost.startsWith('http') ? rawHost : `https://${rawHost}`;
+const host         = rawHost.startsWith('http') 
+                     ? rawHost 
+                     : `https://${rawHost}`;
 const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
                      ? process.env.CALLBACK_PATH
                      : `/${process.env.CALLBACK_PATH}`;
@@ -23,14 +25,14 @@ console.log('→ Using redirectUri:', redirectUri);
 // ─── Express / EJS / Static ──────────────────────────────────────────
 app.use(morgan('dev'));
 app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
+app.set('views',    path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.urlencoded({ extended: true }));
 
 // ─── Secure Session Cookies ──────────────────────────────────────────
 app.set('trust proxy', 1);
 app.use(session({
-  secret:            process.env.SESSION_SECRET || 'fallback-secret-9876',
+  secret:            process.env.SESSION_SECRET || 'fallback-secret',
   resave:            false,
   saveUninitialized: false,
   cookie: {
@@ -46,25 +48,29 @@ app.use(passport.session());
 // ─── Mount signup‐completion routes ─────────────────────────────────
 app.use('/', signupRouter);
 
-// ─── Helper to guard routes ─────────────────────────────────────────
+// ─── Helper to guard routes ───────────────────────────────────────────
 function ensureLoggedIn(req, res, next) {
   if (!req.isAuthenticated()) return res.redirect('/login');
   next();
 }
 
 // ─── Azure B2C OIDC Strategy ────────────────────────────────────────
+const tenant = process.env.AZURE_AD_B2C_TENANT;
+const policy = process.env.AZURE_AD_B2C_POLICY;  // must be B2C_1_signin_signup
 passport.use('azuread-openidconnect', new OIDCStrategy({
-    identityMetadata: `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
-                      `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
-                      `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
-    clientID:       process.env.AZURE_AD_B2C_CLIENT_ID,
-    clientSecret:   process.env.AZURE_AD_B2C_CLIENT_SECRET,
-    redirectUrl:    redirectUri,
-    responseType:   'code',
-    responseMode:   'query',
-    scope:          ['openid','profile','email','offline_access'],
+    // include "?p=" so the metadata has absolute URLs
+    identityMetadata:
+      `https://${tenant}.b2clogin.com/${tenant}.onmicrosoft.com/` +
+      `${policy}/v2.0/.well-known/openid-configuration` +
+      `?p=${policy}`,
+    clientID:               process.env.AZURE_AD_B2C_CLIENT_ID,
+    clientSecret:           process.env.AZURE_AD_B2C_CLIENT_SECRET,
+    redirectUrl:            redirectUri,
+    responseType:           'code',
+    responseMode:           'query',
+    scope:                  ['openid','profile','email','offline_access'],
     allowHttpForRedirectUrl: host.startsWith('http://'),
-    validateIssuer: false
+    validateIssuer:         false
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
@@ -80,9 +86,9 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         email = `${profile.sub}@no-email.local`;
       }
       profile.Email = email;
-      const name = profile.displayName || email.split('@')[0];
+      const name    = profile.displayName || email.split('@')[0];
 
-      // 2) Upsert shell user
+      // 2) Upsert a shell user
       await pool.execute(
         `INSERT INTO users (Username, Email)
            VALUES (?, ?)
@@ -90,16 +96,18 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         [name, email]
       );
 
-      // 3) Check profile completeness
+      // 3) Check profile completion
       const [[u]] = await pool.execute(
-        `SELECT UserID, profile_complete FROM users WHERE Email = ?`,
+        `SELECT UserID, profile_complete
+           FROM users
+          WHERE Email = ?`,
         [email]
       );
       profile.UserID           = u.UserID;
       profile.profile_complete = u.profile_complete === 1;
       profile.Username         = name;
 
-      // 4) If complete, load permissions
+      // 4) Load perms if complete
       if (profile.profile_complete) {
         const [rows] = await pool.execute(`
           SELECT p.PermissionName
@@ -119,6 +127,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         complete: profile.profile_complete
       });
       done(null, profile);
+
     } catch (err) {
       console.error('🔴 Auth callback error', err);
       done(err);
@@ -126,14 +135,14 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
   }
 ));
 
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((obj, done) => done(null, obj));
+passport.serializeUser((user, done)    => done(null, user));
+passport.deserializeUser((obj, done)    => done(null, obj));
 
 // ─── ROUTES ──────────────────────────────────────────────────────────
 
-// Home – public landing
+// Public Home
 app.get('/', (req, res) => {
-  // Optionally redirect logged-in users straight to dashboard:
+  // if you prefer auto-redirect logged-in users:
   // if (req.isAuthenticated()) return res.redirect('/dashboard');
   res.render('home', { user: req.user });
 });
@@ -147,7 +156,7 @@ app.get('/login',
 app.get(callbackPath,
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   (req, res) => {
-    // New users → signup; others → dashboard
+    // first-timers → finish signup; others → dashboard
     if (!req.user.profile_complete) {
       return res.redirect('/complete-profile');
     }
@@ -155,25 +164,35 @@ app.get(callbackPath,
   }
 );
 
-// Dashboard – user’s home after login
+// Dashboard (protected)
 app.get('/dashboard', ensureLoggedIn, (req, res) => {
   res.render('dashboard', { user: req.user });
 });
 
-// Protected example
+// Protected demo
 app.get('/protected', ensureLoggedIn, (req, res) => {
-  res.send(`
-    <h1>Welcome, ${req.user.Username}</h1>
-    <p>Email: ${req.user.Email}</p>
-    <p>Permissions: ${req.user.perms.join(', ') || '(none)'}</p>
-    <a href="/logout">Logout</a>
-  `);
+  res.render('protected', { user: req.user });
 });
 
-// Logout
-app.get('/logout', (req, res, next) =>
-  req.logout(err => err ? next(err) : res.redirect('/'))
-);
+// Logout – clear session + redirect to B2C sign-out
+app.get('/logout', (req, res, next) => {
+  req.logout(err => {
+    if (err) return next(err);
+    req.session.destroy(err => {
+      if (err) return next(err);
+      res.clearCookie('connect.sid', { path: '/' });
+
+      // Azure B2C logout
+      const postLogout = encodeURIComponent(host);
+      const signOutUrl =
+        `https://${tenant}.b2clogin.com/` +
+        `${tenant}.onmicrosoft.com/${policy}/oauth2/v2.0/logout` +
+        `?p=${policy}` +
+        `&post_logout_redirect_uri=${postLogout}`;
+      res.redirect(signOutUrl);
+    });
+  });
+});
 
 // Start server
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
