@@ -24,17 +24,12 @@ const PORT = process.env.PORT || 3000;
 const app  = express();
 
 // ─── Redirect URI ───────────────────────────────────────────────────────────
-// Build either http://localhost:3000/auth/openid/return or
-// https://<YOUR_APP>.azurewebsites.net/auth/openid/return
 const rawHost      = process.env.PUBLIC_HOST || '';
-const host         = rawHost.startsWith('http')
-                     ? rawHost
-                     : `https://${rawHost}`;
-const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
-                     ? process.env.CALLBACK_PATH
+const host         = rawHost.startsWith('http') ? rawHost : `https://${rawHost}`;
+const callbackPath = process.env.CALLBACK_PATH.startsWith('/') 
+                     ? process.env.CALLBACK_PATH 
                      : `/${process.env.CALLBACK_PATH}`;
 const redirectUri  = `${host}${callbackPath}`;
-
 console.log('→ Using redirectUri:', redirectUri);
 
 // ─── MySQL Pool ─────────────────────────────────────────────────────────────
@@ -54,24 +49,25 @@ app.use(morgan('dev'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.urlencoded({ extended: true }));
 
 // ─── Secure Session Cookies ─────────────────────────────────────────────────
-app.set('trust proxy', 1);  // required on Azure App Service
+app.set('trust proxy', 1);
 app.use(session({
-  secret: process.env.SESSION_SECRET,
+  secret: process.env.SESSION_SECRET,           // ← make sure this is set in Azure App Settings
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true,         // only send cookie over HTTPS
-    sameSite: 'lax',      // helps prevent CSRF
-    maxAge: 30 * 60 * 1000 // 30 minutes
+    secure: true,
+    sameSite: 'lax',
+    maxAge: 30 * 60 * 1000
   }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Mount the signup routes for profile completion
+// Mount the signup routes for profile‐completion
 app.use(signupRouter);
 
 // ─── Simple Test Route ──────────────────────────────────────────────────────
@@ -94,14 +90,14 @@ const azureStrategy = new OIDCStrategy(
       `https://${process.env.AZURE_AD_B2C_TENANT}.b2clogin.com/` +
       `${process.env.AZURE_AD_B2C_TENANT}.onmicrosoft.com/` +
       `${process.env.AZURE_AD_B2C_POLICY}/v2.0/.well-known/openid-configuration`,
-    clientID:                  process.env.AZURE_AD_B2C_CLIENT_ID,
-    clientSecret:              process.env.AZURE_AD_B2C_CLIENT_SECRET,
-    redirectUrl:               redirectUri,
-    allowHttpForRedirectUrl:   host.startsWith('http://'),
-    responseType:              'code',
-    responseMode:              'query',
-    scope:                     ['openid','profile','offline_access'],
-    validateIssuer:            false
+    clientID:                process.env.AZURE_AD_B2C_CLIENT_ID,
+    clientSecret:            process.env.AZURE_AD_B2C_CLIENT_SECRET,
+    redirectUrl:             redirectUri,
+    allowHttpForRedirectUrl: host.startsWith('http://'),
+    responseType:            'code',
+    responseMode:            'query',
+    scope:                   ['openid','profile','offline_access'],
+    validateIssuer:          false
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
@@ -132,12 +128,12 @@ const azureStrategy = new OIDCStrategy(
         [u.UserID]
       );
 
-      profile.dbId  = u.UserID;
-      profile.UserID = u.UserID;                    // for callback logic
-      profile.Username = name;                      // for deserialize
-      profile.perms = rows.map(r => r.PermissionName);
-      console.log(`→ user ${email} (id=${u.UserID}) perms:`, profile.perms);
+      profile.dbId      = u.UserID;
+      profile.UserID    = u.UserID;
+      profile.Username  = name;
+      profile.perms     = rows.map(r => r.PermissionName);
 
+      console.log(`→ user ${email} (id=${u.UserID}) perms:`, profile.perms);
       done(null, profile);
     } catch (err) {
       console.error('Auth callback error:', err);
@@ -172,19 +168,21 @@ app.get('/login',
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
 
-// Callback handler – tag new users as incomplete, then go to dashboard
+// **DEBUG** Callback handler – tag new users as incomplete, then go to dashboard
 app.get(callbackPath,
   (req, _res, next) => { console.log('→ [callback] query =', req.query); next(); },
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   async (req, res) => {
+    console.log('🔥 Entered post‑auth handler for userID=', req.user.UserID);
+
     // Check profile_complete in DB
     const [[row]] = await pool.execute(
       'SELECT profile_complete FROM users WHERE UserID = ?',
       [req.user.UserID]
     );
-    req.user.profileComplete = !!row.profile_complete;
+    console.log('🔥 profile_complete flag =', row.profile_complete);
 
-    // Redirect to dashboard
+    req.user.profileComplete = !!row.profile_complete;
     res.redirect('/dashboard');
   }
 );
@@ -202,11 +200,6 @@ app.get('/protected', needPerm('ViewDashboard'), (req, res) => {
     <p>Perms: ${req.user.perms.join(', ') || '(none)'}</p>
     <a href="/logout">Logout</a>
   `);
-});
-
-// Sample extra route
-app.post('/tasks/update', needPerm('UpdateCareTasks'), (_, res) => {
-  res.json({ ok: true });
 });
 
 // Logout
