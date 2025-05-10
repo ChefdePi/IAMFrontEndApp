@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>…</head>
+<body>
+  <header>…</header>
+  <section class="main-content">
+    <div class="container">
+      <h2>Complete Your Profile</h2>
+      <% if (error) { %><p style="color:red"><%= error %></p><% } %>
+      <form method="POST">
+        <label>First Name:<br>
+          <input name="firstName" value="<%= firstName||'' %>" required>
+        </label><br><br>
+        <label>Last Name:<br>
+          <input name="lastName" value="<%= lastName||'' %>" required>
+        </label><br><br>
+        <label>Role:<br>
+          <select name="role" required>
+            <option value="">-- Select Role --</option>
+            <option value="Caregiver" <%= role==='Caregiver'?'selected':'' %>>Caregiver</option>
+            <option value="FamilyMember" <%= role==='FamilyMember'?'selected':'' %>>Family Member</option>
+          </select>
+        </label><br><br>
+        <button type="submit">Save Profile</button>
+      </form>
+    </div>
+  </section>
+  <footer>…</footer>
+</body>
+</html>
