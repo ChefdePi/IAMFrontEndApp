@@ -183,3 +183,14 @@ UNLOCK TABLES;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
 -- Dump completed on 2025-05-04 21:01:22
+-- ─── BEGIN ADD PROFILE FIELDS & DEFAULT ROLE ────────────────────────────────
+
+ALTER TABLE `users`
+  ADD COLUMN `first_name`    VARCHAR(50) NULL,
+  ADD COLUMN `last_name`     VARCHAR(50) NULL,
+  ADD COLUMN `profile_complete` TINYINT(1) NOT NULL DEFAULT 0;
+
+INSERT IGNORE INTO `roles` (`RoleName`)
+  VALUES ('Unassigned');
+
+-- ─── END ADD PROFILE FIELDS & DEFAULT ROLE ────────────────────────────────
