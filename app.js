@@ -1,4 +1,3 @@
-// app.js
 require('dotenv').config();
 
 // ─── ENV DEBUG ──────────────────────────────────────────────────────────────
@@ -15,12 +14,8 @@ const passport         = require('passport');
 const { OIDCStrategy } = require('passport-azure-ad');
 const morgan           = require('morgan');
 const path             = require('path');
-const mysql            = require('mysql2/promise');
-
-// ← centralized pool
-const pool         = require('./db');
-// ← profile‐completion routes
-const signupRouter = require('./routes/signup');
+const pool             = require('./db');
+const signupRouter     = require('./routes/signup');
 
 const PORT = process.env.PORT || 3000;
 const app  = express();
@@ -46,7 +41,7 @@ app.use(express.urlencoded({ extended: true }));
 // ─── Secure Session Cookies ─────────────────────────────────────────────────
 app.set('trust proxy', 1);
 app.use(session({
-  secret:            process.env.SESSION_SECRET,    // ← must be in Azure App Settings
+  secret:            process.env.SESSION_SECRET,
   resave:            false,
   saveUninitialized: false,
   cookie: {
@@ -59,13 +54,13 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ─── Mount signup routes ────────────────────────────────────────────────────
+// ─── Mount profile‐completion routes ────────────────────────────────────────
 app.use(signupRouter);
 
-// ─── Test route ─────────────────────────────────────────────────────────────
+// ─── Simple test route ──────────────────────────────────────────────────────
 app.get('/hello', (_, res) => res.send('Hello world'));
 
-// ─── RBAC helper ─────────────────────────────────────────────────────────────
+// ─── Auth helper for explicit routes ────────────────────────────────────────
 function needPerm(name) {
   return (req, res, next) => {
     if (!req.isAuthenticated?.() || !req.user?.perms?.includes(name)) {
@@ -92,25 +87,28 @@ passport.use('azuread-openidconnect', new OIDCStrategy(
     validateIssuer:          false
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
-  try {
-    // pull the e-mail out…
-    const email = profile.emails[0];
-    // …and attach it to the profile object
-    profile.Email = email;
+    try {
+      // pull the e-mail out…
+      const email = profile.emails[0];
+      // …and attach it to the profile object
+      profile.Email = email;
 
-    // derive a display name
-    const name  = profile.displayName || email.split('@')[0];
+      // derive a display name
+      const name = profile.displayName || email.split('@')[0];
 
-    // now upsert into your users table
-    await pool.execute(
-      `INSERT INTO users (Username, Email)
-         VALUES (?, ?)
-         ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
-      [name, email]
-    );
+      // upsert shell user
+      await pool.execute(
+        `INSERT INTO users (Username, Email)
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
+        [name, email]
+      );
 
       // fetch id & perms
-      const [[u]]  = await pool.execute(`SELECT UserID FROM users WHERE Email = ?`, [email]);
+      const [[u]]  = await pool.execute(
+        `SELECT UserID FROM users WHERE Email = ?`,
+        [email]
+      );
       const [rows] = await pool.execute(`
         SELECT p.PermissionName
           FROM permissions p
@@ -138,7 +136,8 @@ passport.serializeUser((user, done) => done(null, user.dbId));
 passport.deserializeUser(async (id, done) => {
   try {
     const [[row]] = await pool.execute(
-      `SELECT UserID, Username, Email FROM users WHERE UserID = ?`, [id]
+      `SELECT UserID, Username, Email FROM users WHERE UserID = ?`,
+      [id]
     );
     done(null, row || false);
   } catch (e) {
@@ -151,28 +150,37 @@ passport.deserializeUser(async (id, done) => {
 // home
 app.get('/', (req, res) => res.render('home', { user: req.user }));
 
-// kick off login
-app.get('/login',
-  (req, _res, next) => { console.log('→ [login] redirectUri =', redirectUri); next(); },
+// login
+app.get(
+  '/login',
+  (req, res, next) => {
+    console.log('→ [login] redirectUri =', redirectUri);
+    next();
+  },
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
 
-app.get(callbackPath,
+// debug + callback
+app.get(
+  callbackPath,
+  (req, res, next) => {
+    console.log('*** CALLBACK HIT ***', req.method, req.originalUrl, req.query);
+    next();
+  },
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   async (req, res, next) => {
     try {
-      // 1) load profile_complete
+      // load profile_complete
       const [[row]] = await pool.execute(
-        'SELECT profile_complete FROM users WHERE UserID = ?',
+        `SELECT profile_complete FROM users WHERE UserID = ?`,
         [req.user.UserID]
       );
       const isComplete = !!row.profile_complete;
       req.user.profileComplete = isComplete;
 
-      // debug
-      console.log(`→ onboarding check: ${req.user.Email} profile_complete=${row.profile_complete}`);
+      console.log(`*** PASSED AUTH, onboarding check: ${req.user.Email} profile_complete=${row.profile_complete}`);
 
-      // 2) redirect new users → complete-profile, others → dashboard
+      // redirect
       return isComplete
         ? res.redirect('/dashboard')
         : res.redirect('/complete-profile');
@@ -181,17 +189,17 @@ app.get(callbackPath,
     }
   }
 );
+
+// helper to protect pages
 function ensureLoggedIn(req, res, next) {
   if (!req.isAuthenticated()) return res.redirect('/login');
   next();
 }
 
+// dashboard
 app.get('/dashboard', ensureLoggedIn, (req, res) => {
-  // your home.ejs-like banner logic lives in dashboard.ejs
   res.render('dashboard', { user: req.user });
 });
-
-
 
 // protected example
 app.get('/protected', needPerm('ViewDashboard'), (req, res) => {
