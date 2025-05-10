@@ -61,48 +61,62 @@ passport.use(new OIDCStrategy({
     allowHttpForRedirectUrl: host.startsWith('http://'),
     validateIssuer:          false
   },
-  async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
-    try {
-      const email = profile.emails[0];
-      profile.Email = email;
-      const name = profile.displayName || email.split('@')[0];
+async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
+  try {
+    // 1) Robustly pull an email out of whatever claim the token actually returned:
+    const email =
+         profile?.emails?.[0]           // normal local account
+      || profile?._json?.emails?.[0]    // some social IdPs stick it under _json.emails
+      || profile?.upn                  // fallback to UPN (often in `preferred_username`)
+      || null;
 
-      // upsert user record
-      await pool.execute(
-        `INSERT INTO users (Username, Email)
-           VALUES (?, ?)
-           ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
-        [name, email]
-      );
-
-      // fetch UserID & perms
-      const [[u]] = await pool.execute(
-        `SELECT UserID FROM users WHERE Email = ?`, [email]
-      );
-      const [rows] = await pool.execute(`
-        SELECT p.PermissionName
-          FROM permissions p
-          JOIN rolepermissions rp ON rp.PermissionID = p.PermissionID
-          JOIN userroles ur       ON ur.RoleID       = rp.RoleID
-         WHERE ur.UserID = ?`, [u.UserID]
-      );
-
-      profile.dbId     = u.UserID;
-      profile.UserID   = u.UserID;
-      profile.Username = name;
-      profile.perms    = rows.map(r => r.PermissionName);
-
-      console.log('→ Auth Success - Profile:', {
-        email:    profile.Email,
-        dbId:     profile.dbId,
-        perms:    profile.perms
-      });
-
-      done(null, profile);
-    } catch (err) {
-      done(err);
+    if (!email) {
+      console.error('❌ No email in ID-token, raw profile:', JSON.stringify(profile, null,2));
+      // gracefully reject rather than blow up
+      return done(null, false, { message: 'Email claim missing' });
     }
+
+    profile.Email = email;
+    const name    = profile.displayName || email.split('@')[0];
+
+    // 2) Your existing upsert logic...
+    await pool.execute(
+      `INSERT INTO users (Username, Email)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
+      [name, email]
+    );
+
+    const [[u]] = await pool.execute(
+      `SELECT UserID FROM users WHERE Email = ?`, 
+      [email]
+    );
+    const [rows] = await pool.execute(`
+      SELECT p.PermissionName
+        FROM permissions p
+        JOIN rolepermissions rp ON rp.PermissionID = p.PermissionID
+        JOIN userroles ur       ON ur.RoleID       = rp.RoleID
+       WHERE ur.UserID = ?`,
+      [u.UserID]
+    );
+
+    profile.dbId     = u.UserID;
+    profile.UserID   = u.UserID;
+    profile.Username = name;
+    profile.perms    = rows.map(r => r.PermissionName);
+
+    console.log('→ Auth Success – Profile:', {
+      email: profile.Email,
+      dbId:  profile.dbId,
+      perms: profile.perms
+    });
+
+    done(null, profile);
+  } catch (err) {
+    console.error('Auth callback error', err);
+    done(err);
   }
+}
 ));
 
 passport.serializeUser((user, done) => done(null, user));
