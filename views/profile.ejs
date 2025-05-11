@@ -1,4 +1,4 @@
-  <!-- profile.ejs -->
+<!-- views/profile.ejs -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/styles.css"/>
 </head>
 <body>
-  <%- include('partials/header',{ user }) %>
+  <%- include('partials/header', { user }) %>
 
   <section class="main-content">
     <div class="container">
@@ -18,6 +18,7 @@
       <p><strong>Last Name:</strong>  <%= user.last_name  || '(not set)' %></p>
       <p><strong>Role:</strong>       <%= user.role       || '(not set)' %></p>
       <p><strong>Completed:</strong>  <%= user.profileComplete ? 'Yes' : 'No' %></p>
+
       <% if (!user.profileComplete) { %>
         <a href="/complete-profile" class="btn">Finish Your Profile</a>
       <% } else { %>

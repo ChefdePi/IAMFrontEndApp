@@ -7,12 +7,12 @@ const { OIDCStrategy } = require('passport-azure-ad');
 const morgan           = require('morgan');
 const path             = require('path');
 
-const pool               = require('./db');
-const signupRouter       = require('./routes/signup');
-const permissionsRouter  = require('./routes/permissions');
-const rolesRouter        = require('./routes/roles');
-const usersRouter        = require('./routes/users');
-const reportsRouter      = require('./routes/reports');
+const pool              = require('./db');
+const signupRouter      = require('./routes/signup');
+const permissionsRouter = require('./routes/permissions');
+const rolesRouter       = require('./routes/roles');
+const usersRouter       = require('./routes/users');
+const reportsRouter     = require('./routes/reports');
 const { requirePermission, getUserPermissions } = require('./rbac');
 
 const PORT = process.env.PORT || 3000;
@@ -74,7 +74,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
-      // Extract email
+      // Extract a usable email
       let email =
            profile?.emails?.[0]
         || profile?._json?.emails?.[0]
@@ -90,7 +90,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       // B2C object-ID
       const objectId = profile.oid || profile.sub;
 
-      // Upsert shell user
+      // Upsert basic user shell
       await pool.execute(
         `INSERT INTO Users (AzureB2CObjectId, Email, DisplayName)
              VALUES (?, ?, ?)
@@ -100,36 +100,34 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         [objectId, email, profile.displayName || email.split('@')[0]]
       );
 
-      // Fetch full user record (including first_name, last_name, role, profile_complete)
-      let u;
-      try {
-        const [[row]] = await pool.execute(
-          `SELECT UserID, first_name, last_name, role, profile_complete
-             FROM Users
-            WHERE AzureB2CObjectId = ?`,
-          [objectId]
-        );
-        u = row;
-      } catch {
-        // Fallback if extended columns aren’t yet present
-        const [[row]] = await pool.execute(
-          `SELECT UserID FROM Users WHERE AzureB2CObjectId = ?`,
-          [objectId]
-        );
-        u = { UserID: row.UserID, first_name:null, last_name:null, role:null, profile_complete:0 };
-      }
+      // Fetch first_name, last_name, profile_complete
+      const [[u]] = await pool.execute(
+        `SELECT UserID, first_name, last_name, profile_complete
+           FROM Users
+          WHERE AzureB2CObjectId = ?`,
+        [objectId]
+      );
 
       // Attach to session profile
-      profile.UserID           = u.UserID;
-      profile.first_name       = u.first_name;
-      profile.last_name        = u.last_name;
-      profile.role             = u.role;
-      profile.profileComplete  = u.profile_complete === 1;
+      profile.UserID          = u.UserID;
+      profile.first_name      = u.first_name;
+      profile.last_name       = u.last_name;
+      profile.profileComplete = u.profile_complete === 1;
 
-      // inside your OIDCStrategy verify callback, after you attach u -> profile:
+      // 🔐 Log every login
       console.log('🔐 User logged in:', profile.UserID, profile.Email);
 
-      // Load permissions if profile is complete
+      // Lookup assigned role via UserRoles → Roles
+      const [roleRows] = await pool.execute(
+        `SELECT r.RoleName
+           FROM UserRoles ur
+           JOIN Roles      r ON ur.RoleID = r.RoleID
+          WHERE ur.UserID = ?`,
+        [u.UserID]
+      );
+      profile.role = roleRows.length ? roleRows[0].RoleName : null;
+
+      // Load detailed permissions if profile is complete
       if (profile.profileComplete) {
         const [perms] = await pool.execute(`
           SELECT p.PermissionName
@@ -150,6 +148,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
     }
   }
 ));
+
 passport.serializeUser((u, done) => done(null, u));
 passport.deserializeUser((u, done) => done(null, u));
 
@@ -193,12 +192,12 @@ app.get(
   requirePermission('ManageUsers'),
   async (req, res, next) => {
     try {
-      const [users] = await pool.execute(
+      const [pending] = await pool.execute(
         `SELECT UserID, Email, profile_complete
            FROM Users
           WHERE profile_complete = 0`
       );
-      res.render('admin-users', { user: req.user, pending: users });
+      res.render('admin-users', { user: req.user, pending });
     } catch (err) {
       next(err);
     }
@@ -207,18 +206,18 @@ app.get(
 
 app.get('/posts', ensureLoggedIn, (req, res) => {
   if (!['Editor','Admin'].includes(req.user.role)) {
-    return res.status(403).render('forbidden',{ user: req.user });
+    return res.status(403).render('forbidden', { user: req.user });
   }
-  res.render('posts',{ user: req.user });
+  res.render('posts', { user: req.user });
 });
 
 app.get('/protected', ensureLoggedIn, (req, res) =>
-  res.render('protected',{ user: req.user })
+  res.render('protected', { user: req.user })
 );
 
 // ─── ABOUT & CONTACT ───────────────────────────────────────────────
-app.get('/about',   (req,res) => res.render('about',   { user: req.user }));
-app.get('/contact', (req,res) => res.render('contact', { user: req.user }));
+app.get('/about',   (req, res) => res.render('about',   { user: req.user }));
+app.get('/contact', (req, res) => res.render('contact', { user: req.user }));
 
 // ─── MOUNT PERMISSIONS / ROLES / USERS / REPORTS ──────────────────
 app.use(
@@ -249,12 +248,12 @@ app.get('/logout', (req, res, next) => {
     if (err) return next(err);
     req.session.destroy(err => {
       if (err) return next(err);
-      res.clearCookie('connect.sid',{ path:'/' });
-      const postLogout = encodeURIComponent(host);
+      res.clearCookie('connect.sid', { path:'/' });
+      const post = encodeURIComponent(host);
       const signOutUrl =
         `https://${tenant}.b2clogin.com/` +
         `${tenant}.onmicrosoft.com/${policy}/oauth2/v2.0/logout` +
-        `?p=${policy}&post_logout_redirect_uri=${postLogout}`;
+        `?p=${policy}&post_logout_redirect_uri=${post}`;
       res.redirect(signOutUrl);
     });
   });

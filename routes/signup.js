@@ -53,9 +53,9 @@ router.post('/complete-profile', ensureLoggedIn, async (req, res) => {
     // Persist DisplayName, first_name, last_name, and mark complete
     await pool.execute(
       `UPDATE Users
-          SET DisplayName     = ?,
-              first_name      = ?,
-              last_name       = ?,
+          SET DisplayName      = ?,
+              first_name       = ?,
+              last_name        = ?,
               profile_complete = 1
         WHERE UserID = ?`,
       [displayName, firstName, lastName, req.user.UserID]
@@ -66,7 +66,10 @@ router.post('/complete-profile', ensureLoggedIn, async (req, res) => {
       `SELECT RoleID FROM Roles WHERE RoleName = ?`,
       [role]
     );
-    await pool.execute(`DELETE FROM UserRoles WHERE UserID = ?`, [req.user.UserID]);
+    await pool.execute(
+      `DELETE FROM UserRoles WHERE UserID = ?`,
+      [req.user.UserID]
+    );
     await pool.execute(
       `INSERT INTO UserRoles (UserID, RoleID) VALUES (?, ?)`,
       [req.user.UserID, r.RoleID]

@@ -1,24 +1,53 @@
-<form method="POST" action="/complete-profile">
-  <p><strong>Email:</strong> <%= email %></p>
+<!-- views/complete-profile.ejs -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Complete Your Profile</title>
+  <link rel="stylesheet" href="/styles.css"/>
+</head>
+<body>
+  <%- include('partials/header', { user }) %>
 
-  <label>First Name:<br>
-    <input type="text" name="firstName" value="<%= firstName %>" required>
-  </label><br><br>
+  <section class="main-content">
+    <div class="container">
+      <h2>Complete Your Profile</h2>
 
-  <label>Last Name:<br>
-    <input type="text" name="lastName" value="<%= lastName %>" required>
-  </label><br><br>
+      <% if (error) { %>
+        <div class="banner warn"><%= error %></div>
+      <% } %>
 
-  <label>Role:<br>
-    <select name="role" required>
-      <option value="">Select a role</option>
-      <% roles.forEach(rn => { %>
-        <option value="<%= rn %>" <%= role===rn ? 'selected' : '' %>>
-          <%= rn %>
-        </option>
-      <% }) %>
-    </select>
-  </label><br><br>
+      <form method="POST" action="/complete-profile">
+        <p><strong>Email:</strong> <%= email %></p>
 
-  <button type="submit" class="btn">Finish Registration</button>
-</form>
+        <label>
+          First Name:<br>
+          <input type="text" name="firstName" value="<%= firstName %>" required>
+        </label><br><br>
+
+        <label>
+          Last Name:<br>
+          <input type="text" name="lastName" value="<%= lastName %>" required>
+        </label><br><br>
+
+        <label>
+          Role:<br>
+          <select name="role" required>
+            <option value="">Select a role</option>
+            <% roles.forEach(rn => { %>
+              <option value="<%= rn %>" <%= role===rn ? 'selected' : '' %>>
+                <%= rn %>
+              </option>
+            <% }) %>
+          </select>
+        </label><br><br>
+
+        <button type="submit" class="btn">Finish Registration</button>
+      </form>
+    </div>
+  </section>
+
+  <%- include('partials/footer') %>
+</body>
+</html>
