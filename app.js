@@ -12,7 +12,6 @@ const signupRouter       = require('./routes/signup');
 const permissionsRouter  = require('./routes/permissions');
 const rolesRouter        = require('./routes/roles');
 const usersRouter        = require('./routes/users');
-// ← import the helper to reload permissions
 const { requirePermission, getUserPermissions } = require('./rbac');
 
 const PORT = process.env.PORT || 3000;
@@ -50,6 +49,7 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Auth helper
 function ensureLoggedIn(req, res, next) {
   if (!req.isAuthenticated()) return res.redirect('/login');
   next();
@@ -73,7 +73,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
-      // 1) Extract email
+      // Extract email
       let email =
            profile?.emails?.[0]
         || profile?._json?.emails?.[0]
@@ -86,10 +86,10 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       }
       profile.Email = email;
 
-      // 2) Grab the B2C object-ID
+      // B2C object-ID
       const objectId = profile.oid || profile.sub;
 
-      // 3) Upsert into Users including the NOT NULL AzureB2CObjectId
+      // Upsert user record
       await pool.execute(
         `INSERT INTO Users (AzureB2CObjectId, Email, DisplayName)
              VALUES (?, ?, ?)
@@ -99,7 +99,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         [objectId, email, profile.displayName || email.split('@')[0]]
       );
 
-      // 4) Fetch user data, with fallback if extended columns are missing
+      // Fetch UserID (ignore missing extended columns)
       let u;
       try {
         const [[row]] = await pool.execute(
@@ -110,15 +110,14 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         );
         u = row;
       } catch {
-        // Missing those columns → only fetch UserID
         const [[row]] = await pool.execute(
           `SELECT UserID FROM Users WHERE AzureB2CObjectId = ?`,
           [objectId]
         );
-        u = { UserID: row.UserID, first_name: null, last_name: null, role: null, profile_complete: 0 };
+        u = { UserID: row.UserID, first_name:null, last_name:null, role:null, profile_complete:0 };
       }
 
-      // 5) Attach to profile
+      // Attach to profile
       profile.UserID           = u.UserID;
       profile.first_name       = u.first_name;
       profile.last_name        = u.last_name;
@@ -126,7 +125,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       profile.profile_complete = u.profile_complete === 1;
       profile.profileComplete  = profile.profile_complete;
 
-      // 6) Load permissions if profile complete
+      // Load permissions if complete
       if (profile.profileComplete) {
         const [perms] = await pool.execute(`
           SELECT p.PermissionName
@@ -141,16 +140,16 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         profile.perms = [];
       }
 
-      return done(null, profile);
+      done(null, profile);
     } catch (err) {
-      return done(err);
+      done(err);
     }
   }
 ));
 passport.serializeUser((u, done) => done(null, u));
 passport.deserializeUser((u, done) => done(null, u));
 
-// Public & Signup routes
+// ─── PUBLIC & SIGNUP ROUTES ────────────────────────────────────────
 app.use('/', signupRouter);
 app.get('/login',
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
@@ -166,10 +165,10 @@ app.get(callbackPath,
 );
 app.get('/', (req, res) => res.render('home', { user: req.user }));
 
-// ← UPDATED DASHBOARD ROUTE
+// ─── DASHBOARD & PROFILE ──────────────────────────────────────────
+// Dashboard now reloads & logs perms
 app.get('/dashboard', ensureLoggedIn, async (req, res, next) => {
   try {
-    // reload permissions
     const perms = await getUserPermissions(req.user.UserID);
     console.log('▶️ User permissions reloaded:', req.user.UserID, perms);
     res.render('dashboard', { user: req.user, perms });
@@ -177,12 +176,49 @@ app.get('/dashboard', ensureLoggedIn, async (req, res, next) => {
     next(err);
   }
 });
+app.get('/profile', ensureLoggedIn, (req, res) =>
+  res.render('profile', { user: req.user })
+);
 
-app.get('/profile', ensureLoggedIn, (req, res) => {
-  res.render('profile', { user: req.user });
+// ─── NEW ADMIN/POSTS/REPORTS/PROTECTED ROUTES ──────────────────────
+// Admin dashboard for pending users
+app.get(
+  '/admin/users',
+  requirePermission('ManageUsers'),
+  async (req, res, next) => {
+    try {
+      const [users] = await pool.execute(
+        `SELECT UserID, Email, profile_complete FROM Users WHERE profile_complete = 0`
+      );
+      res.render('admin-users', { user: req.user, pending: users });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// Sample posts page (Editors + Admins)
+app.get('/posts', ensureLoggedIn, (req, res) => {
+  if (!['Editor','Admin'].includes(req.user.role)) {
+    return res.status(403).render('forbidden', { user: req.user });
+  }
+  res.render('posts', { user: req.user });
 });
 
-// Mount & protect RBAC routes
+// Sample reports page (Viewers + Admins)
+app.get('/reports', ensureLoggedIn, (req, res) => {
+  if (!['Viewer','Admin'].includes(req.user.role)) {
+    return res.status(403).render('forbidden', { user: req.user });
+  }
+  res.render('reports', { user: req.user });
+});
+
+// Sample protected page (any logged-in user)
+app.get('/protected', ensureLoggedIn, (req, res) =>
+  res.render('protected', { user: req.user })
+);
+
+// ─── MOUNT RBAC ROUTES ────────────────────────────────────────────
 app.use(
   '/permissions',
   requirePermission('ManageUsers'),
@@ -199,7 +235,7 @@ app.use(
   usersRouter
 );
 
-// Logout
+// ─── LOGOUT ────────────────────────────────────────────────────────
 app.get('/logout', (req, res, next) => {
   req.logout(err => {
     if (err) return next(err);
@@ -216,7 +252,7 @@ app.get('/logout', (req, res, next) => {
   });
 });
 
-// Start server
+// ─── START SERVER ─────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
