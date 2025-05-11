@@ -22,7 +22,6 @@ const rawHost      = process.env.PUBLIC_HOST || '';
 const host         = rawHost.startsWith('http') ? rawHost : `https://${rawHost}`;
 const callbackPath = process.env.CALLBACK_PATH.startsWith('/') ? process.env.CALLBACK_PATH : `/${process.env.CALLBACK_PATH}`;
 const redirectUri  = `${host}${callbackPath}`;
-console.log('→ Using redirectUri:', redirectUri);
 
 // Logging, Body-parsing, Static
 app.use(morgan('dev'));
@@ -48,7 +47,6 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Helpers
 function ensureLoggedIn(req, res, next) {
   if (!req.isAuthenticated()) return res.redirect('/login');
   next();
@@ -85,10 +83,10 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       }
       profile.Email = email;
 
-      // 2) Grab the B2C object-ID (mandatory)
+      // 2) Grab the B2C object-ID
       const objectId = profile.oid || profile.sub;
 
-      // 3) Upsert user, including AzureB2CObjectId
+      // 3) Upsert user, including the NOT NULL AzureB2CObjectId
       await pool.execute(
         `INSERT INTO Users (AzureB2CObjectId, Email, DisplayName)
              VALUES (?, ?, ?)
@@ -98,13 +96,32 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         [objectId, email, profile.displayName || email.split('@')[0]]
       );
 
-      // 4) Fetch full user record
-      const [[u]] = await pool.execute(
-        `SELECT UserID, first_name, last_name, role, profile_complete
-           FROM Users
-          WHERE AzureB2CObjectId = ?`,
-        [objectId]
-      );
+      // 4) Fetch user data with fallback if extended columns are missing
+      let u;
+      try {
+        const [[row]] = await pool.execute(
+          `SELECT UserID, first_name, last_name, role, profile_complete
+             FROM Users
+            WHERE AzureB2CObjectId = ?`,
+          [objectId]
+        );
+        u = row;
+      } catch (colErr) {
+        // table missing those columns – fall back to just UserID
+        const [[row]] = await pool.execute(
+          `SELECT UserID FROM Users WHERE AzureB2CObjectId = ?`,
+          [objectId]
+        );
+        u = {
+          UserID:           row.UserID,
+          first_name:       null,
+          last_name:        null,
+          role:             null,
+          profile_complete: 0
+        };
+      }
+
+      // 5) Attach to profile
       profile.UserID           = u.UserID;
       profile.first_name       = u.first_name;
       profile.last_name        = u.last_name;
@@ -112,9 +129,9 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       profile.profile_complete = u.profile_complete === 1;
       profile.profileComplete  = profile.profile_complete;
 
-      // 5) Load permissions if profile is complete
+      // 6) Load permissions
       if (profile.profileComplete) {
-        const [rows] = await pool.execute(`
+        const [perms] = await pool.execute(`
           SELECT p.PermissionName
             FROM Permissions p
             JOIN RolePermissions rp ON rp.PermissionID = p.PermissionID
@@ -122,14 +139,14 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
            WHERE ur.UserID = ?`,
           [u.UserID]
         );
-        profile.perms = rows.map(r => r.PermissionName);
+        profile.perms = perms.map(r => r.PermissionName);
       } else {
         profile.perms = [];
       }
 
-      done(null, profile);
+      return done(null, profile);
     } catch (err) {
-      done(err);
+      return done(err);
     }
   }
 ));
@@ -178,11 +195,11 @@ app.get('/logout', (req, res, next) => {
     req.session.destroy(err => {
       if (err) return next(err);
       res.clearCookie('connect.sid', { path: '/' });
-      const post = encodeURIComponent(host);
+      const postLogout = encodeURIComponent(host);
       const signOutUrl =
         `https://${tenant}.b2clogin.com/` +
         `${tenant}.onmicrosoft.com/${policy}/oauth2/v2.0/logout` +
-        `?p=${policy}&post_logout_redirect_uri=${post}`;
+        `?p=${policy}&post_logout_redirect_uri=${postLogout}`;
       res.redirect(signOutUrl);
     });
   });
