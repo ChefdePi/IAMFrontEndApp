@@ -1,3 +1,4 @@
+// ─── app.js ─────────────────────────────────────────────────────────
 require('dotenv').config();
 const express          = require('express');
 const session          = require('express-session');
@@ -8,6 +9,7 @@ const path             = require('path');
 
 const pool             = require('./db');
 const signupRouter     = require('./routes/signup');
+const permissionsRouter= require('./routes/permissions');
 const rolesRouter      = require('./routes/roles');
 const usersRouter      = require('./routes/users');
 const { requirePermission } = require('./rbac');
@@ -15,27 +17,23 @@ const { requirePermission } = require('./rbac');
 const PORT = process.env.PORT || 3000;
 const app  = express();
 
-// ─── Build host & redirectUri ────────────────────────────────────────
+// Build host & redirectUri
 const rawHost      = process.env.PUBLIC_HOST || '';
-const host         = rawHost.startsWith('http')
-                     ? rawHost
-                     : `https://${rawHost}`;
-const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
-                     ? process.env.CALLBACK_PATH
-                     : `/${process.env.CALLBACK_PATH}`;
+const host         = rawHost.startsWith('http') ? rawHost : `https://${rawHost}`;
+const callbackPath = process.env.CALLBACK_PATH.startsWith('/') ? process.env.CALLBACK_PATH : `/${process.env.CALLBACK_PATH}`;
 const redirectUri  = `${host}${callbackPath}`;
 console.log('→ Using redirectUri:', redirectUri);
 
-// ─── Middleware: Logging, Body-parsing, Static files ─────────────────
+// Logging, Body‐parsing, Static
 app.use(morgan('dev'));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── View engine ────────────────────────────────────────────────────
+// EJS
 app.set('view engine', 'ejs');
 app.set('views',       path.join(__dirname, 'views'));
 
-// ─── Session & Passport setup ───────────────────────────────────────
+// Session & Passport
 app.set('trust proxy', 1);
 app.use(session({
   secret:            process.env.SESSION_SECRET || 'fallback-secret',
@@ -50,20 +48,13 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ─── Helpers ─────────────────────────────────────────────────────────
+// Helpers
 function ensureLoggedIn(req, res, next) {
   if (!req.isAuthenticated()) return res.redirect('/login');
   next();
 }
-function requireRole(role) {
-  return (req, res, next) => {
-    if (!req.isAuthenticated()) return res.redirect('/login');
-    if (req.user.role === role) return next();
-    res.status(403).render('forbidden', { user: req.user });
-  };
-}
 
-// ─── Azure B2C OIDC Strategy ────────────────────────────────────────
+// Azure B2C OIDC Strategy
 const tenant = process.env.AZURE_AD_B2C_TENANT;
 const policy = process.env.AZURE_AD_B2C_POLICY;
 passport.use('azuread-openidconnect', new OIDCStrategy({
@@ -81,7 +72,55 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
   },
   async (_iss, _sub, profile, _accessToken, _refreshToken, done) => {
     try {
-      // … your upsert + load perms logic as before …
+      // 1) Extract email
+      let email =
+           profile?.emails?.[0]
+        || profile?._json?.emails?.[0]
+        || profile?._json?.email
+        || profile?.upn
+        || null;
+      if (!email) {
+        console.warn('⚠️ No email claim – falling back to sub:', profile.sub);
+        email = `${profile.sub}@no-email.local`;
+      }
+      profile.Email = email;
+
+      // 2) Upsert user shell
+      await pool.execute(
+        `INSERT INTO users (Username, Email)
+           VALUES (?, ?)
+           ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
+        [profile.displayName || email.split('@')[0], email]
+      );
+
+      // 3) Fetch full user record
+      const [[u]] = await pool.execute(
+        `SELECT UserID, first_name, last_name, role, profile_complete
+           FROM users
+          WHERE Email = ?`,
+        [email]
+      );
+      profile.UserID           = u.UserID;
+      profile.first_name       = u.first_name;
+      profile.last_name        = u.last_name;
+      profile.role             = u.role;
+      profile.profile_complete = u.profile_complete === 1;
+      profile.profileComplete  = profile.profile_complete;
+
+      // 4) Load permissions if profile is complete
+      if (profile.profileComplete) {
+        const [rows] = await pool.execute(`
+          SELECT p.PermissionName
+            FROM Permissions p
+            JOIN RolePermissions rp ON rp.PermissionID = p.PermissionID
+            JOIN UserRoles ur       ON ur.RoleID       = rp.RoleID
+           WHERE ur.UserID = ?
+        `, [u.UserID]);
+        profile.perms = rows.map(r => r.PermissionName);
+      } else {
+        profile.perms = [];
+      }
+
       done(null, profile);
     } catch (err) {
       done(err);
@@ -91,13 +130,11 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
 passport.serializeUser((u, done) => done(null, u));
 passport.deserializeUser((u, done) => done(null, u));
 
-// ─── Public & Signup‐completion Routes ──────────────────────────────
+// Public & Signup routes
 app.use('/', signupRouter);
-
 app.get('/login',
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
 );
-
 app.get(callbackPath,
   passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
   (req, res) => {
@@ -107,12 +144,16 @@ app.get(callbackPath,
     res.redirect('/dashboard');
   }
 );
+app.get('/',            (req, res) => res.render('home',      { user: req.user }));
+app.get('/dashboard',   ensureLoggedIn,        (req, res) => res.render('dashboard', { user: req.user }));
+app.get('/profile',     ensureLoggedIn,        (req, res) => res.render('profile',   { user: req.user }));
 
-app.get('/',       (req, res) => res.render('home',      { user: req.user }));
-app.get('/dashboard', ensureLoggedIn, (req, res) => res.render('dashboard', { user: req.user }));
-app.get('/profile',   ensureLoggedIn, (req, res) => res.render('profile',   { user: req.user }));
-
-// ─── Mount & Protect RBAC Admin Routes ──────────────────────────────
+// Mount & protect RBAC routes
+app.use(
+  '/permissions',
+  requirePermission('ManageUsers'),
+  permissionsRouter
+);
 app.use(
   '/roles',
   requirePermission('ManageUsers'),
@@ -124,30 +165,7 @@ app.use(
   usersRouter
 );
 
-// ─── Other Role‐ or Session‐based Routes ─────────────────────────────
-app.get('/reports', ensureLoggedIn, (req, res) => {
-  if (!req.user.perms.includes('ViewDashboard')) {
-    return res.status(403).render('forbidden', { user: req.user });
-  }
-  res.render('reports', { user: req.user });
-});
-
-// ─── Admin UI (using requireRole as an alternative) ──────────────────
-app.get('/admin/users',
-  requireRole('admin'),
-  async (req, res, next) => {
-    try {
-      const [users] = await pool.execute(
-        `SELECT UserID, Email, profile_complete FROM users WHERE profile_complete = 0`
-      );
-      res.render('admin-users', { user: req.user, pending: users });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-// ─── Logout ──────────────────────────────────────────────────────────
+// Logout
 app.get('/logout', (req, res, next) => {
   req.logout(err => {
     if (err) return next(err);
@@ -164,14 +182,7 @@ app.get('/logout', (req, res, next) => {
   });
 });
 
-// ─── Start Server ───────────────────────────────────────────────────
+// Start server
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
-const permissionsRouter = require('./routes/permissions');
-
-app.use(
-  '/permissions',
-  requirePermission('ManageUsers'),
-  permissionsRouter
-);

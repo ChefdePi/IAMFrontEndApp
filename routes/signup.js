@@ -1,4 +1,4 @@
-// routes/signup.js
+// ─── routes/signup.js ───────────────────────────────────────────────
 const express     = require('express');
 const pool        = require('../db');
 const { logAction } = require('../audit');
@@ -11,7 +11,7 @@ function ensureLoggedIn(req, res, next) {
   next();
 }
 
-// GET the “complete your profile” form
+// GET form
 router.get('/complete-profile', ensureLoggedIn, (req, res) => {
   res.render('complete-profile', {
     email:     req.user.Email,
@@ -22,12 +22,11 @@ router.get('/complete-profile', ensureLoggedIn, (req, res) => {
   });
 });
 
-// POST the filled-out form
+// POST form
 router.post('/complete-profile', ensureLoggedIn, async (req, res) => {
   const { firstName, lastName, role } = req.body;
   const validRoles = ['Viewer','Editor','Admin'];
 
-  // validate
   if (!firstName || !lastName || !validRoles.includes(role)) {
     return res.render('complete-profile', {
       email:     req.user.Email,
@@ -37,7 +36,7 @@ router.post('/complete-profile', ensureLoggedIn, async (req, res) => {
   }
 
   try {
-    // 1) Update the users table
+    // Update user
     await pool.execute(
       `UPDATE users
           SET first_name       = ?,
@@ -45,17 +44,19 @@ router.post('/complete-profile', ensureLoggedIn, async (req, res) => {
               role             = ?,
               profile_complete = 1
         WHERE UserID = ?`,
-      [firstName, lastName, role, req.user.UserID]
+      [ firstName, lastName, role, req.user.UserID ]
     );
 
-    // 2) Patch the session so req.user reflects the new values
-    req.user.first_name       = firstName;
-    req.user.last_name        = lastName;
-    req.user.role             = role;
-    req.user.profile_complete = true;
-    req.user.profileComplete  = true;
+    // Patch session
+    Object.assign(req.user, {
+      first_name:       firstName,
+      last_name:        lastName,
+      role,
+      profile_complete: true,
+      profileComplete:  true
+    });
 
-    // 3) Audit the completion
+    // Audit
     await logAction({
       userId:    req.user.UserID,
       action:    'COMPLETE_PROFILE',
@@ -64,9 +65,7 @@ router.post('/complete-profile', ensureLoggedIn, async (req, res) => {
       details:   { firstName, lastName, role }
     });
 
-    // 4) Redirect to dashboard
     res.redirect('/dashboard');
-
   } catch (err) {
     console.error('❌ Error completing profile:', err);
     res.render('complete-profile', {
