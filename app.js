@@ -86,7 +86,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       // 2) Grab the B2C object-ID
       const objectId = profile.oid || profile.sub;
 
-      // 3) Upsert user, including the NOT NULL AzureB2CObjectId
+      // 3) Upsert into Users including the NOT NULL AzureB2CObjectId
       await pool.execute(
         `INSERT INTO Users (AzureB2CObjectId, Email, DisplayName)
              VALUES (?, ?, ?)
@@ -96,7 +96,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         [objectId, email, profile.displayName || email.split('@')[0]]
       );
 
-      // 4) Fetch user data with fallback if extended columns are missing
+      // 4) Fetch user data, with fallback if extended columns are missing
       let u;
       try {
         const [[row]] = await pool.execute(
@@ -106,19 +106,13 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
           [objectId]
         );
         u = row;
-      } catch (colErr) {
-        // table missing those columns – fall back to just UserID
+      } catch {
+        // Missing those columns → only fetch UserID
         const [[row]] = await pool.execute(
           `SELECT UserID FROM Users WHERE AzureB2CObjectId = ?`,
           [objectId]
         );
-        u = {
-          UserID:           row.UserID,
-          first_name:       null,
-          last_name:        null,
-          role:             null,
-          profile_complete: 0
-        };
+        u = { UserID: row.UserID, first_name: null, last_name: null, role: null, profile_complete: 0 };
       }
 
       // 5) Attach to profile
@@ -129,7 +123,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       profile.profile_complete = u.profile_complete === 1;
       profile.profileComplete  = profile.profile_complete;
 
-      // 6) Load permissions
+      // 6) Load permissions if profile complete
       if (profile.profileComplete) {
         const [perms] = await pool.execute(`
           SELECT p.PermissionName
