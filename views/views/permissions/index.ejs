@@ -1,0 +1,20 @@
+<!-- views/permissions/index.ejs -->
+<h1>Permissions</h1>
+<a href="/permissions/new">+ New Permission</a>
+<table>
+  <thead><tr><th>Name</th><th>Description</th><th>Actions</th></tr></thead>
+  <tbody>
+    <% permissions.forEach(p => { %>
+      <tr>
+        <td><%= p.PermissionName %></td>
+        <td><%= p.Description %></td>
+        <td>
+          <a href="/permissions/<%= p.PermissionID %>/edit">Edit</a>
+          <form method="POST" action="/permissions/<%= p.PermissionID %>?_method=DELETE" style="display:inline">
+            <button>Delete</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+  </tbody>
+</table>
