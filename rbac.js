@@ -15,10 +15,16 @@ async function getUserPermissions(userId) {
 
 function requirePermission(permission) {
   return async (req, res, next) => {
-    const userId = req.session.userId;
-    const perms  = await getUserPermissions(userId);
-    if (perms.includes(permission)) return next();
-    res.status(403).render('errors/403');
+    if (!req.isAuthenticated()) {
+      return res.redirect('/login');
+    }
+    const userId = req.user.UserID;
+    const perms = await getUserPermissions(userId);
+    if (perms.includes(permission)) {
+      return next();
+    }
+    // render your existing forbidden.ejs
+    return res.status(403).render('forbidden', { user: req.user });
   };
 }
 

@@ -29,38 +29,22 @@
       <form method="POST" action="/complete-profile">
         <p><strong>Email:</strong> <%= email %></p>
 
-        <label>
-          First Name:<br>
-          <input
-            type="text"
-            name="firstName"
-            value="<%= firstName %>"
-            required
-          >
-        </label>
-        <br><br>
+        <label>First Name:<br>
+          <input type="text" name="firstName" value="<%= firstName %>" required>
+        </label><br><br>
 
-        <label>
-          Last Name:<br>
-          <input
-            type="text"
-            name="lastName"
-            value="<%= lastName %>"
-            required
-          >
-        </label>
-        <br><br>
+        <label>Last Name:<br>
+          <input type="text" name="lastName" value="<%= lastName %>" required>
+        </label><br><br>
 
-        <label>
-          Role:<br>
+        <label>Role:<br>
           <select name="role" required>
             <option value="">Select a role</option>
-            <option value="Viewer"       <%= role==='Viewer'      ? 'selected' : '' %>>Viewer</option>
-            <option value="Editor"       <%= role==='Editor'      ? 'selected' : '' %>>Editor</option>
-            <option value="Admin"        <%= role==='Admin'       ? 'selected' : '' %>>Admin</option>
+            <% roles.forEach(rn => { %>
+              <option value="<%= rn %>" <%= role===rn?'selected':'' %>><%= rn %></option>
+            <% }) %>
           </select>
-        </label>
-        <br><br>
+        </label><br><br>
 
         <button type="submit" class="btn">Finish Registration</button>
       </form>
