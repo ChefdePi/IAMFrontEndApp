@@ -1,3 +1,4 @@
+<!-- views/complete-profile.ejs -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,7 +8,6 @@
   <link rel="stylesheet" href="/styles.css"/>
 </head>
 <body>
-    
   <header>
     <div class="container">
       <h1>SecureIAM</h1>
@@ -21,25 +21,47 @@
   <section class="main-content">
     <div class="container">
       <h2>Complete Your Profile</h2>
+
       <% if (error) { %>
         <div class="banner warn"><%= error %></div>
       <% } %>
+
       <form method="POST" action="/complete-profile">
         <p><strong>Email:</strong> <%= email %></p>
-        <label>First Name:<br>
-          <input type="text" name="firstName" value="<%= firstName %>" required>
-        </label><br><br>
-        <label>Last Name:<br>
-          <input type="text" name="lastName" value="<%= lastName %>" required>
-        </label><br><br>
-        <label>Role:<br>
+
+        <label>
+          First Name:<br>
+          <input
+            type="text"
+            name="firstName"
+            value="<%= firstName %>"
+            required
+          >
+        </label>
+        <br><br>
+
+        <label>
+          Last Name:<br>
+          <input
+            type="text"
+            name="lastName"
+            value="<%= lastName %>"
+            required
+          >
+        </label>
+        <br><br>
+
+        <label>
+          Role:<br>
           <select name="role" required>
             <option value="">Select a role</option>
-            <option value="viewer"<%= role==='viewer'?' selected':'' %>>Viewer</option>
-            <option value="editor"<%= role==='editor'?' selected':'' %>>Editor</option>
-            <option value="admin"<%= role==='admin'?' selected':'' %>>Admin</option>
+            <option value="Viewer"       <%= role==='Viewer'      ? 'selected' : '' %>>Viewer</option>
+            <option value="Editor"       <%= role==='Editor'      ? 'selected' : '' %>>Editor</option>
+            <option value="Admin"        <%= role==='Admin'       ? 'selected' : '' %>>Admin</option>
           </select>
-        </label><br><br>
+        </label>
+        <br><br>
+
         <button type="submit" class="btn">Finish Registration</button>
       </form>
     </div>

@@ -1,10 +1,13 @@
 // routes/signup.js
-const express = require('express');
-const pool    = require('../db');
-const router  = express.Router();
+const express     = require('express');
+const pool        = require('../db');
+const { logAction } = require('../audit');
+const router      = express.Router();
 
 function ensureLoggedIn(req, res, next) {
-  if (!req.isAuthenticated()) return res.redirect('/login');
+  if (!req.isAuthenticated()) {
+    return res.redirect('/login');
+  }
   next();
 }
 
@@ -12,9 +15,9 @@ function ensureLoggedIn(req, res, next) {
 router.get('/complete-profile', ensureLoggedIn, (req, res) => {
   res.render('complete-profile', {
     email:     req.user.Email,
-    firstName: '',
-    lastName:  '',
-    role:      '',
+    firstName: req.user.first_name || '',
+    lastName:  req.user.last_name  || '',
+    role:      req.user.role       || '',
     error:     null
   });
 });
@@ -22,11 +25,14 @@ router.get('/complete-profile', ensureLoggedIn, (req, res) => {
 // POST the filled-out form
 router.post('/complete-profile', ensureLoggedIn, async (req, res) => {
   const { firstName, lastName, role } = req.body;
-  if (!firstName || !lastName || !['viewer','editor','admin'].includes(role)) {
+  const validRoles = ['Viewer','Editor','Admin'];
+
+  // validate
+  if (!firstName || !lastName || !validRoles.includes(role)) {
     return res.render('complete-profile', {
       email:     req.user.Email,
       firstName, lastName, role,
-      error:     'All fields are required and role must be valid.'
+      error:     'All fields are required, and you must select a valid role.'
     });
   }
 
@@ -34,35 +40,31 @@ router.post('/complete-profile', ensureLoggedIn, async (req, res) => {
     // 1) Update the users table
     await pool.execute(
       `UPDATE users
-         SET first_name       = ?,
-             last_name        = ?,
-             role             = ?,
-             profile_complete = 1
-       WHERE UserID = ?`,
+          SET first_name       = ?,
+              last_name        = ?,
+              role             = ?,
+              profile_complete = 1
+        WHERE UserID = ?`,
       [firstName, lastName, role, req.user.UserID]
     );
 
-    // 2) Patch the session so the banner clears immediately
+    // 2) Patch the session so req.user reflects the new values
     req.user.first_name       = firstName;
     req.user.last_name        = lastName;
     req.user.role             = role;
     req.user.profile_complete = true;
     req.user.profileComplete  = true;
 
-    // 3) Attempt to write audit_log, but don’t fail if it’s missing
-    try {
-      await pool.execute(
-        `INSERT INTO audit_log (UserID, Action) VALUES (?, 'ProfileCompleted')`,
-        [req.user.UserID]
-      );
-    } catch (auditErr) {
-      console.warn(
-        '⚠️ Skipping audit-log insert (table missing?):',
-        auditErr.code
-      );
-    }
+    // 3) Audit the completion
+    await logAction({
+      userId:    req.user.UserID,
+      action:    'COMPLETE_PROFILE',
+      entity:    'User',
+      entityId:  req.user.UserID,
+      details:   { firstName, lastName, role }
+    });
 
-    // 4) Redirect home
+    // 4) Redirect to dashboard
     res.redirect('/dashboard');
 
   } catch (err) {
