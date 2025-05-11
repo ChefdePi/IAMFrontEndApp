@@ -168,3 +168,10 @@ app.get('/logout', (req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
+const permissionsRouter = require('./routes/permissions');
+
+app.use(
+  '/permissions',
+  requirePermission('ManageUsers'),
+  permissionsRouter
+);
