@@ -111,3 +111,27 @@ footer .container {
         padding: 30px 0;
     }
 }
+/* home page hero image */
+.hero-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1em auto;
+  border-radius: 8px;
+}
+.container p, .container ul {
+  font-size: 1rem;
+  line-height: 1.5;
+  margin-bottom: 1em;
+}
+.banner {
+  background: #f4f4f4;
+  padding: 2em 1em;
+  text-align: center;
+  margin-bottom: 2em;
+}
+.banner .btn {
+  display: inline-block;
+  margin-top: 1em;
+  padding: 0.5em 1.5em;
+}
