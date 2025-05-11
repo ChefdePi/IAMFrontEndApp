@@ -12,7 +12,7 @@ const signupRouter       = require('./routes/signup');
 const permissionsRouter  = require('./routes/permissions');
 const rolesRouter        = require('./routes/roles');
 const usersRouter        = require('./routes/users');
-const reportsRouter = require('./routes/reports');
+const reportsRouter      = require('./routes/reports');
 const { requirePermission, getUserPermissions } = require('./rbac');
 
 const PORT = process.env.PORT || 3000;
@@ -56,7 +56,7 @@ function ensureLoggedIn(req, res, next) {
   next();
 }
 
-// Azure B2C OIDC Strategy
+// ─── Azure B2C OIDC Strategy ────────────────────────────────────────
 const tenant = process.env.AZURE_AD_B2C_TENANT;
 const policy = process.env.AZURE_AD_B2C_POLICY;
 passport.use('azuread-openidconnect', new OIDCStrategy({
@@ -90,7 +90,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       // B2C object-ID
       const objectId = profile.oid || profile.sub;
 
-      // Upsert user record
+      // Upsert shell user
       await pool.execute(
         `INSERT INTO Users (AzureB2CObjectId, Email, DisplayName)
              VALUES (?, ?, ?)
@@ -100,7 +100,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         [objectId, email, profile.displayName || email.split('@')[0]]
       );
 
-      // Fetch UserID (ignore missing extended columns)
+      // Fetch full user record (including first_name, last_name, role, profile_complete)
       let u;
       try {
         const [[row]] = await pool.execute(
@@ -111,6 +111,7 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         );
         u = row;
       } catch {
+        // Fallback if extended columns aren’t yet present
         const [[row]] = await pool.execute(
           `SELECT UserID FROM Users WHERE AzureB2CObjectId = ?`,
           [objectId]
@@ -118,15 +119,14 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
         u = { UserID: row.UserID, first_name:null, last_name:null, role:null, profile_complete:0 };
       }
 
-      // Attach to profile
+      // Attach to session profile
       profile.UserID           = u.UserID;
       profile.first_name       = u.first_name;
       profile.last_name        = u.last_name;
       profile.role             = u.role;
-      profile.profile_complete = u.profile_complete === 1;
-      profile.profileComplete  = profile.profile_complete;
+      profile.profileComplete  = u.profile_complete === 1;
 
-      // Load permissions if complete
+      // Load permissions if profile is complete
       if (profile.profileComplete) {
         const [perms] = await pool.execute(`
           SELECT p.PermissionName
@@ -152,11 +152,13 @@ passport.deserializeUser((u, done) => done(null, u));
 
 // ─── PUBLIC & SIGNUP ROUTES ────────────────────────────────────────
 app.use('/', signupRouter);
+
 app.get('/login',
-  passport.authenticate('azuread-openidconnect', { failureRedirect: '/' })
+  passport.authenticate('azuread-openidconnect', { failureRedirect:'/' })
 );
+
 app.get(callbackPath,
-  passport.authenticate('azuread-openidconnect', { failureRedirect: '/' }),
+  passport.authenticate('azuread-openidconnect', { failureRedirect:'/' }),
   (req, res) => {
     if (!req.user.profileComplete) {
       return res.redirect('/complete-profile');
@@ -164,10 +166,10 @@ app.get(callbackPath,
     res.redirect('/dashboard');
   }
 );
+
 app.get('/', (req, res) => res.render('home', { user: req.user }));
 
 // ─── DASHBOARD & PROFILE ──────────────────────────────────────────
-// Dashboard now reloads & logs perms
 app.get('/dashboard', ensureLoggedIn, async (req, res, next) => {
   try {
     const perms = await getUserPermissions(req.user.UserID);
@@ -177,19 +179,21 @@ app.get('/dashboard', ensureLoggedIn, async (req, res, next) => {
     next(err);
   }
 });
+
 app.get('/profile', ensureLoggedIn, (req, res) =>
   res.render('profile', { user: req.user })
 );
 
-// ─── NEW ADMIN/POSTS/REPORTS/PROTECTED ROUTES ──────────────────────
-// Admin dashboard for pending users
+// ─── ADMIN / POSTS / PROTECTED ─────────────────────────────────────
 app.get(
   '/admin/users',
   requirePermission('ManageUsers'),
   async (req, res, next) => {
     try {
       const [users] = await pool.execute(
-        `SELECT UserID, Email, profile_complete FROM Users WHERE profile_complete = 0`
+        `SELECT UserID, Email, profile_complete
+           FROM Users
+          WHERE profile_complete = 0`
       );
       res.render('admin-users', { user: req.user, pending: users });
     } catch (err) {
@@ -198,29 +202,22 @@ app.get(
   }
 );
 
-// Sample posts page (Editors + Admins)
 app.get('/posts', ensureLoggedIn, (req, res) => {
   if (!['Editor','Admin'].includes(req.user.role)) {
-    return res.status(403).render('forbidden', { user: req.user });
+    return res.status(403).render('forbidden',{ user: req.user });
   }
-  res.render('posts', { user: req.user });
+  res.render('posts',{ user: req.user });
 });
 
-// Sample reports page (Viewers + Admins)
-app.get('/reports', ensureLoggedIn, (req, res) => {
-  if (!['Viewer','Admin'].includes(req.user.role)) {
-    return res.status(403).render('forbidden', { user: req.user });
-  }
-  res.render('reports', { user: req.user });
-});
-
-// Sample protected page (any logged-in user)
 app.get('/protected', ensureLoggedIn, (req, res) =>
-  res.render('protected', { user: req.user })
+  res.render('protected',{ user: req.user })
 );
+
+// ─── ABOUT & CONTACT ───────────────────────────────────────────────
 app.get('/about',   (req,res) => res.render('about',   { user: req.user }));
 app.get('/contact', (req,res) => res.render('contact', { user: req.user }));
-// ─── MOUNT RBAC ROUTES ────────────────────────────────────────────
+
+// ─── MOUNT PERMISSIONS / ROLES / USERS / REPORTS ──────────────────
 app.use(
   '/permissions',
   requirePermission('ManageUsers'),
@@ -239,16 +236,17 @@ app.use(
 app.use(
   '/reports',
   ensureLoggedIn,
-  requirePermission('ViewDashboard'),   // or whatever permission controls report viewing
+  requirePermission('ViewDashboard'),
   reportsRouter
 );
+
 // ─── LOGOUT ────────────────────────────────────────────────────────
 app.get('/logout', (req, res, next) => {
   req.logout(err => {
     if (err) return next(err);
     req.session.destroy(err => {
       if (err) return next(err);
-      res.clearCookie('connect.sid', { path: '/' });
+      res.clearCookie('connect.sid',{ path:'/' });
       const postLogout = encodeURIComponent(host);
       const signOutUrl =
         `https://${tenant}.b2clogin.com/` +
