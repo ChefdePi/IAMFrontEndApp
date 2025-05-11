@@ -7,12 +7,13 @@ const { OIDCStrategy } = require('passport-azure-ad');
 const morgan           = require('morgan');
 const path             = require('path');
 
-const pool              = require('./db');
-const signupRouter      = require('./routes/signup');
-const permissionsRouter = require('./routes/permissions');
-const rolesRouter       = require('./routes/roles');
-const usersRouter       = require('./routes/users');
-const { requirePermission } = require('./rbac');
+const pool               = require('./db');
+const signupRouter       = require('./routes/signup');
+const permissionsRouter  = require('./routes/permissions');
+const rolesRouter        = require('./routes/roles');
+const usersRouter        = require('./routes/users');
+// ← import the helper to reload permissions
+const { requirePermission, getUserPermissions } = require('./rbac');
 
 const PORT = process.env.PORT || 3000;
 const app  = express();
@@ -20,7 +21,9 @@ const app  = express();
 // Build host & redirectUri
 const rawHost      = process.env.PUBLIC_HOST || '';
 const host         = rawHost.startsWith('http') ? rawHost : `https://${rawHost}`;
-const callbackPath = process.env.CALLBACK_PATH.startsWith('/') ? process.env.CALLBACK_PATH : `/${process.env.CALLBACK_PATH}`;
+const callbackPath = process.env.CALLBACK_PATH.startsWith('/')
+                     ? process.env.CALLBACK_PATH
+                     : `/${process.env.CALLBACK_PATH}`;
 const redirectUri  = `${host}${callbackPath}`;
 
 // Logging, Body-parsing, Static
@@ -161,9 +164,23 @@ app.get(callbackPath,
     res.redirect('/dashboard');
   }
 );
-app.get('/',            (req, res) => res.render('home',      { user: req.user }));
-app.get('/dashboard',   ensureLoggedIn,        (req, res) => res.render('dashboard', { user: req.user }));
-app.get('/profile',     ensureLoggedIn,        (req, res) => res.render('profile',   { user: req.user }));
+app.get('/', (req, res) => res.render('home', { user: req.user }));
+
+// ← UPDATED DASHBOARD ROUTE
+app.get('/dashboard', ensureLoggedIn, async (req, res, next) => {
+  try {
+    // reload permissions
+    const perms = await getUserPermissions(req.user.UserID);
+    console.log('▶️ User permissions reloaded:', req.user.UserID, perms);
+    res.render('dashboard', { user: req.user, perms });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/profile', ensureLoggedIn, (req, res) => {
+  res.render('profile', { user: req.user });
+});
 
 // Mount & protect RBAC routes
 app.use(

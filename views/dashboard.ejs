@@ -35,21 +35,28 @@
       <% } %>
 
       <h2>Your Dashboard</h2>
-      <p>Welcome, <strong><%= user.Username %></strong>!</p>
+      <p>Welcome, <strong><%= user.DisplayName %></strong>!</p>
       <p>Email: <%= user.Email %></p>
-      <p>Permissions: <%= user.perms.length 
-           ? user.perms.join(', ') 
-           : '(none)' %>
-      </p>
+
+      <h3>Permissions</h3>
+      <ul>
+        <% if (perms && perms.length) { %>
+          <% perms.forEach(p => { %>
+            <li><%= p %></li>
+          <% }) %>
+        <% } else { %>
+          <li>(none)</li>
+        <% } %>
+      </ul>
 
       <ul class="dashboard-links">
-        <% if (user.role === 'admin') { %>
+        <% if (perms.includes('ManageUsers')) { %>
           <li><a href="/admin/users">Review New Users</a></li>
         <% } %>
-        <% if (['editor','admin'].includes(user.role)) { %>
+        <% if (perms.includes('ManageUsers') || perms.includes('ViewDashboard')) { %>
           <li><a href="/posts">Create / Edit Posts</a></li>
         <% } %>
-        <% if (['viewer','admin'].includes(user.role)) { %>
+        <% if (perms.includes('ViewDashboard')) { %>
           <li><a href="/reports">View Reports</a></li>
         <% } %>
         <li><a href="/profile">My Profile</a></li>
