@@ -1,8 +1,11 @@
+<!-- views/partials/header.ejs -->
+ 
 <header>
   <div class="container">
     <h1><i class="fas fa-lock"></i> SecureIAM</h1>
     <nav>
       <a href="/">Home</a>
+      <%- include('partials/header', { user }) %>
       <% if (user) { %>
         <a href="/dashboard">Dashboard</a>
         <a href="/profile">My Profile</a>
@@ -19,6 +22,7 @@
       <% } else { %>
         <a href="/login">Login</a>
       <% } %>
+      <%- include('partials/footer') %>
     </nav>
   </div>
 </header>

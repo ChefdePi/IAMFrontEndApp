@@ -1,21 +1,17 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>View Reports</title>
-  <link rel="stylesheet" href="/styles.css"/>
-</head>
-<body>
-  <%- include('partials/header', { user: user }) %>
-
-  <section class="main-content">
-    <div class="container">
-      <h2>Reports</h2>
-      <p>This page is for <strong>Viewer</strong> and <strong>Admin</strong> roles only.</p>
-    </div>
-  </section>
-
-  <%- include('partials/footer') %>
-</body>
-</html>
+<%- include('partials/header', { user }) %>
+<section class="main-content">
+  <div class="container">
+    <h2>Submit a Report</h2>
+    <% if (message) { %>
+      <div class="banner success"><%= message %></div>
+    <% } %>
+    <form method="POST" action="/reports">
+      <label>Title:</label>
+      <input type="text" name="title" required>
+      <label>Description:</label>
+      <textarea name="description" rows="5" required></textarea>
+      <button class="btn">Submit</button>
+    </form>
+  </div>
+</section>
+<%- include('partials/footer') %>

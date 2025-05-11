@@ -12,6 +12,7 @@ const signupRouter       = require('./routes/signup');
 const permissionsRouter  = require('./routes/permissions');
 const rolesRouter        = require('./routes/roles');
 const usersRouter        = require('./routes/users');
+const reportsRouter = require('./routes/reports');
 const { requirePermission, getUserPermissions } = require('./rbac');
 
 const PORT = process.env.PORT || 3000;
@@ -217,7 +218,8 @@ app.get('/reports', ensureLoggedIn, (req, res) => {
 app.get('/protected', ensureLoggedIn, (req, res) =>
   res.render('protected', { user: req.user })
 );
-
+app.get('/about',   (req,res) => res.render('about',   { user: req.user }));
+app.get('/contact', (req,res) => res.render('contact', { user: req.user }));
 // ─── MOUNT RBAC ROUTES ────────────────────────────────────────────
 app.use(
   '/permissions',
@@ -234,7 +236,12 @@ app.use(
   requirePermission('ManageUsers'),
   usersRouter
 );
-
+app.use(
+  '/reports',
+  ensureLoggedIn,
+  requirePermission('ViewDashboard'),   // or whatever permission controls report viewing
+  reportsRouter
+);
 // ─── LOGOUT ────────────────────────────────────────────────────────
 app.get('/logout', (req, res, next) => {
   req.logout(err => {
