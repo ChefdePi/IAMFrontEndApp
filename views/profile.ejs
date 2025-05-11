@@ -8,16 +8,16 @@
   <link rel="stylesheet" href="/styles.css"/>
 </head>
 <body>
-  <%- include('partials/header', { user }) %>
+  <%- include('partials/header',{ user }) %>
 
   <section class="main-content">
     <div class="container">
       <h2>My Profile</h2>
-      <p><strong>Email:</strong> <%= user.Email %></p>
-      <p><strong>Name:</strong>  <%= user.DisplayName || '(not set)' %></p>
-      <p><strong>Role:</strong>  <%= user.role        || '(not set)' %></p>
-      <p><strong>Completed:</strong> <%= user.profileComplete ? 'Yes' : 'No' %></p>
-
+      <p><strong>Email:</strong>      <%= user.Email %></p>
+      <p><strong>First Name:</strong> <%= user.first_name || '(not set)' %></p>
+      <p><strong>Last Name:</strong>  <%= user.last_name  || '(not set)' %></p>
+      <p><strong>Role:</strong>       <%= user.role       || '(not set)' %></p>
+      <p><strong>Completed:</strong>  <%= user.profileComplete ? 'Yes' : 'No' %></p>
       <% if (!user.profileComplete) { %>
         <a href="/complete-profile" class="btn">Finish Your Profile</a>
       <% } else { %>

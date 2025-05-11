@@ -9,22 +9,7 @@
 </head>
 <body>
 
-  <header>
-    <div class="container">
-      <h1><i class="fas fa-lock"></i> SecureIAM</h1>
-      <nav>
-        <a href="/">Home</a>
-        <a href="#">About</a>
-        <a href="#">Contact</a>
-        <% if (user) { %>
-          <a href="/dashboard">Dashboard</a>
-          <a href="/logout">Logout</a>
-        <% } else { %>
-          <a href="/login">Login</a>
-        <% } %>
-      </nav>
-    </div>
-  </header>
+  <%- include('partials/header', { user }) %>
 
   <section class="banner">
     <div class="container">
@@ -35,6 +20,7 @@
 
       <h2>Welcome to the IAM System Prototype</h2>
       <p>A secure, scalable, and simple Identity and Access Management solution designed specifically for aged care environments.</p>
+
       <% if (user) { %>
         <a href="/dashboard" class="btn">Go to Dashboard</a>
       <% } else { %>
@@ -43,11 +29,6 @@
     </div>
   </section>
 
-  <footer>
-    <div class="container">
-      <p>&copy; 2025 SecureIAM. All rights reserved.</p>
-    </div>
-  </footer>
-
+  <%- include('partials/footer') %>
 </body>
 </html>

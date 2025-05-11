@@ -126,6 +126,9 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       profile.role             = u.role;
       profile.profileComplete  = u.profile_complete === 1;
 
+      // inside your OIDCStrategy verify callback, after you attach u -> profile:
+      console.log('🔐 User logged in:', profile.UserID, profile.Email);
+
       // Load permissions if profile is complete
       if (profile.profileComplete) {
         const [perms] = await pool.execute(`
