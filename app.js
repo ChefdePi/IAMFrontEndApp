@@ -87,10 +87,10 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
 
       // 2) Upsert user shell
       await pool.execute(
-        `INSERT INTO users (Username, Email)
-           VALUES (?, ?)
-           ON DUPLICATE KEY UPDATE Username = VALUES(Username)`,
-        [profile.displayName || email.split('@')[0], email]
+        `INSERT INTO users (Email, DisplayName)
+          VALUES (?, ?)
+          ON DUPLICATE KEY UPDATE DisplayName = VALUES(DisplayName)`,
+        [email, profile.displayName || email.split('@')[0]]
       );
 
       // 3) Fetch full user record
