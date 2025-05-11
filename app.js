@@ -7,11 +7,11 @@ const { OIDCStrategy } = require('passport-azure-ad');
 const morgan           = require('morgan');
 const path             = require('path');
 
-const pool             = require('./db');
-const signupRouter     = require('./routes/signup');
-const permissionsRouter= require('./routes/permissions');
-const rolesRouter      = require('./routes/roles');
-const usersRouter      = require('./routes/users');
+const pool              = require('./db');
+const signupRouter      = require('./routes/signup');
+const permissionsRouter = require('./routes/permissions');
+const rolesRouter       = require('./routes/roles');
+const usersRouter       = require('./routes/users');
 const { requirePermission } = require('./rbac');
 
 const PORT = process.env.PORT || 3000;
@@ -24,7 +24,7 @@ const callbackPath = process.env.CALLBACK_PATH.startsWith('/') ? process.env.CAL
 const redirectUri  = `${host}${callbackPath}`;
 console.log('→ Using redirectUri:', redirectUri);
 
-// Logging, Body‐parsing, Static
+// Logging, Body-parsing, Static
 app.use(morgan('dev'));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -85,20 +85,25 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       }
       profile.Email = email;
 
-      // 2) Upsert user shell
+      // 2) Grab the B2C object-ID (mandatory)
+      const objectId = profile.oid || profile.sub;
+
+      // 3) Upsert user, including AzureB2CObjectId
       await pool.execute(
-        `INSERT INTO users (Email, DisplayName)
-          VALUES (?, ?)
-          ON DUPLICATE KEY UPDATE DisplayName = VALUES(DisplayName)`,
-        [email, profile.displayName || email.split('@')[0]]
+        `INSERT INTO Users (AzureB2CObjectId, Email, DisplayName)
+             VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+             DisplayName      = VALUES(DisplayName),
+             AzureB2CObjectId = VALUES(AzureB2CObjectId)`,
+        [objectId, email, profile.displayName || email.split('@')[0]]
       );
 
-      // 3) Fetch full user record
+      // 4) Fetch full user record
       const [[u]] = await pool.execute(
         `SELECT UserID, first_name, last_name, role, profile_complete
-           FROM users
-          WHERE Email = ?`,
-        [email]
+           FROM Users
+          WHERE AzureB2CObjectId = ?`,
+        [objectId]
       );
       profile.UserID           = u.UserID;
       profile.first_name       = u.first_name;
@@ -107,15 +112,16 @@ passport.use('azuread-openidconnect', new OIDCStrategy({
       profile.profile_complete = u.profile_complete === 1;
       profile.profileComplete  = profile.profile_complete;
 
-      // 4) Load permissions if profile is complete
+      // 5) Load permissions if profile is complete
       if (profile.profileComplete) {
         const [rows] = await pool.execute(`
           SELECT p.PermissionName
             FROM Permissions p
             JOIN RolePermissions rp ON rp.PermissionID = p.PermissionID
             JOIN UserRoles ur       ON ur.RoleID       = rp.RoleID
-           WHERE ur.UserID = ?
-        `, [u.UserID]);
+           WHERE ur.UserID = ?`,
+          [u.UserID]
+        );
         profile.perms = rows.map(r => r.PermissionName);
       } else {
         profile.perms = [];
