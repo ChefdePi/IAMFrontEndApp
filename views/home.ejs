@@ -1,34 +1,36 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>IAM System Prototype</title>
-  <link rel="stylesheet" href="/styles.css" />
-  <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
-</head>
-<body>
+<section class="banner">
+  <div class="container">
 
-  <%- include('partials/header', { user }) %>
+    <!-- Hero composite wrapper -->
+    <div class="hero-visual">
+      <!-- 1. Background (twice as wide) -->
+      <img
+        src="/images/your-bg.png"
+        alt="abstract Eld3rSec background"
+        class="hero-bg">
 
-  <section class="banner">
-    <div class="container">
-      <!-- Hero Image -->
-      <img src="/images/oldpplbball.png"
-           alt="Residents playing basketball"
-           class="hero-img">
+      <!-- 2. Main old-people image -->
+      <img
+        src="/images/oldpplbball.png"
+        alt="Residents playing basketball"
+        class="hero-img">
 
-      <h2>Welcome to the IAM System Prototype</h2>
-      <p>A secure, scalable, and simple Identity and Access Management solution designed specifically for aged care environments.</p>
-
-      <% if (user) { %>
-        <a href="/dashboard" class="btn">Go to Dashboard</a>
-      <% } else { %>
-        <a href="/login" class="btn">Login / Register</a>
-      <% } %>
+      <!-- 3. Logo -->
+      <img
+        src="/images/eld3rsec-logo.png"
+        alt="Eld3rSec logo"
+        class="hero-logo">
     </div>
-  </section>
 
-  <%- include('partials/footer') %>
-</body>
-</html>
+    <!-- your existing heading + text + button -->
+    <h2>Welcome to the IAM System Prototype</h2>
+    <p>A secure, scalable, and simple Identity and Access Management solution designed specifically for aged care environments.</p>
+
+    <% if (user) { %>
+      <a href="/dashboard" class="btn">Go to Dashboard</a>
+    <% } else { %>
+      <a href="/login" class="btn">Login / Register</a>
+    <% } %>
+
+  </div>
+</section>

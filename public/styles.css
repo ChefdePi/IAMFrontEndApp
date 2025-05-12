@@ -182,3 +182,43 @@ form .btn {
 form .btn:hover {
   background: #0056b3;
 }
+/* 1. Positioning wrapper */
+.hero-visual {
+  position: relative;
+  width: 100%;           /* same as .container’s max-width */
+  max-width: 800px;      /* match your container */
+  margin: 0 auto 2em;    /* center & give some space below */
+  overflow: hidden;      /* clip any overflow from the BG */
+  height: auto;
+}
+
+/* 2. Twice-wide background, centered behind */
+.hero-bg {
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 200%;           /* 2 × hero-img width */
+  height: auto;
+  z-index: 1;
+}
+
+/* 3. Main hero image on top of BG */
+.hero-img {
+  position: relative;
+  display: block;
+  width: 100%;           /* your base width */
+  height: auto;
+  border-radius: 8px;
+  margin: 0 auto;
+  z-index: 2;
+}
+
+/* 4. Logo pinned top-left */
+.hero-logo {
+  position: absolute;
+  top: 10px;             /* tweak as needed */
+  left: 10px;
+  width: 120px;          /* pick a suitable size */
+  height: auto;
+  z-index: 3;
+}
