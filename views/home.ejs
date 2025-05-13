@@ -29,6 +29,40 @@
     </div>
   </section>
 
-  <%- include('partials/footer') %>
+   <!-- Privacy Popup HTML -->
+  <div id="privacy-popup" class="privacy-popup">
+    <div class="privacy-content">
+      <h3>Privacy Notice</h3>
+      <p>In compliance with the Australian Privacy Principles (APP 11), Eld3rSec and the SecureIAM system ensure:</p>
+      <ul>
+        <li>Your personal information is protected against misuse, interference, loss, and unauthorized access (APP 11.1)</li>
+        <li>We implement rigorous security measures to safeguard your data (APP 11.2)</li>
+        <li>All data handling complies with the Privacy Act 1988 and industry best practices</li>
+        <li>Continuous monitoring and improvement of our security protocols</li>
+      </ul>    
+      <p>By continuing to use this site, you acknowledge our commitment to protecting your privacy in accordance with Australian regulations.</p>
+      <div class="privacy-buttons">
+        <button id="accept-privacy" class="privacy-btn">Got It!</button>
+        <button id="decline-privacy" class="privacy-btn decline">Decline</button>
+      </div>
+    </div>
+  </div>
+
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      setTimeout(function() {
+        document.getElementById('privacy-popup').style.display = 'block';
+      }, 2000);
+
+      document.getElementById('accept-privacy').addEventListener('click', function() {
+        document.getElementById('privacy-popup').style.display = 'none';
+      });
+
+      document.getElementById('decline-privacy').addEventListener('click', function() {
+        window.location.href = 'https://www.google.com';
+      });
+    });
+  </script>
 </body>
 </html>
