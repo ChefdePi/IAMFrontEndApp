@@ -1,4 +1,5 @@
 <%- include('partials/header', { user }) %>
+
 <section class="main-content">
   <div class="container">
     <h2>Submit a Report</h2>
@@ -12,6 +13,63 @@
       <textarea name="description" rows="5" required></textarea>
       <button class="btn">Submit</button>
     </form>
+
+    <!-- Dynamic example report based on user role -->
+    <% if (exampleReport) { %>
+      <hr>
+      <h2>Example Report for Your Role</n2>
+      <h3><%= exampleReport.title %></h3>
+      <p><%= exampleReport.description %></p>
+      <p><small>Submitted on <%= exampleReport.createdAt.toLocaleDateString() %></small></p>
+
+      <% if (user.role === 'admin') { %>
+        <h4>Audit Logs (Full Access)</h4>
+        <pre><%= JSON.stringify(exampleReport.auditLog, null, 2) %></pre>
+
+      <% } else if (user.role === 'auditor') { %>
+        <h4>Audit Logs (Read-Only)</h4>
+        <ul>
+          <% exampleReport.auditLog.forEach(entry => { %>
+            <li><%= entry.timestamp %> — <%= entry.action %> by <%= entry.userName %></li>
+          <% }) %>
+        </ul>
+
+      <% } else if (user.role === 'carer' || user.role === 'nurse') { %>
+        <h4>Care Plan Details</h4>
+        <p><strong>Resident:</strong> <%= exampleReport.residentName %></p>
+        <p><strong>Care Activities:</strong> <%= exampleReport.careActivities.join(', ') %></p>
+
+      <% } else if (user.role === 'allied') { %>
+        <h4>Therapy Session Notes</h4>
+        <p><%= exampleReport.therapyNotes %></p>
+        <p><strong>Health Metrics:</strong> <%= exampleReport.healthMetrics %></p>
+
+      <% } else if (user.role === 'family') { %>
+        <h4>Family View</h4>
+        <p><%= exampleReport.summary %></p>
+        <p><em>If you need further details, please contact your assigned carer.</em></p>
+
+      <% } else if (user.role === 'resident') { %>
+        <% if (exampleReport.residentId === user.id) { %>
+          <h4>Your Personal Report</h4>
+          <p><%= exampleReport.summary %></p>
+        <% } else { %>
+          <p>You are not authorised to view this report.</p>
+        <% } %>
+
+      <% } else { %>
+        <p>You don’t have permission to view detailed content of this report.</p>
+      <% } %>
+    <% } %>
+
+    <!-- Static sample Janice Werribee report -->
+    <hr>
+    <h2>Sample Report: Janice Werribee</h2>
+    <p><strong>Name:</strong> Janice Werribee</p>
+    <p><strong>Age:</strong> 82</p>
+    <p><strong>Health Summary:</strong> Blood pressure 125/75 mmHg; HbA1c 6.8%; medication adherence excellent.</p>
+    <p><strong>Next Appointment:</strong> 15 June 2025</p>
   </div>
 </section>
+
 <%- include('partials/footer') %>
