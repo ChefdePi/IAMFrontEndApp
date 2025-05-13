@@ -182,3 +182,50 @@ form .btn {
 form .btn:hover {
   background: #0056b3;
 }
+
+.privacy-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 900px;
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 20px rgba(0,0,0,0.2);
+    padding: 25px;
+    z-index: 1000;
+    display: none;
+}
+.privacy-content h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1.5em;
+    text-align: center;
+}
+.privacy-content p {
+    margin-bottom: 25px;
+    font-size: 1.1em;
+    line-height: 1.6;
+    text-align: center;
+}
+.privacy-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+}
+.privacy-btn {
+    padding: 12px 24px;
+    background: #0066cc;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1em;
+    transition: background-color 0.3s;
+}
+.privacy-btn.decline {
+    background: #cc3300;
+}
+.privacy-btn:hover {
+    opacity: 0.9;
+}
