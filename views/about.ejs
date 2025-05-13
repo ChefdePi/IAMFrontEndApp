@@ -1,8 +1,54 @@
-<%- include('partials/header',{ user }) %>
+<%- include('partials/header', { user }) %>
+
 <section class="main-content">
   <div class="container">
+
+    <!-- Page title -->
     <h2>About SecureIAM</h2>
-    <p>SecureIAM is a prototype IAM system for aged care, demonstrating RBAC, audit logging, and Azure B2C.</p>
-  </div>
+
+    <!-- Elevator pitch -->
+    <p>
+      SecureIAM is a prototype identity-and-access-management platform purpose-built
+      for Australia’s aged-care sector. The goal: give carers, nurses, allied-health
+      staff, and administrators the right access at the right time—no more, no less.
+    </p>
+
+    <!-- Mission -->
+    <h3>Our Mission</h3>
+    <p>
+      To safeguard elderly residents’ data and simplify compliance for aged-care
+      providers by blending cloud-native security patterns with human-centric design.
+      In plain English: airtight security that doesn’t slow down care.
+    </p>
+
+    <!-- What makes us different -->
+    <h3>What Sets SecureIAM Apart</h3>
+    <ul>
+      <li><strong>Role-Based + Attribute-Based Access&nbsp;Control</strong> (RBAC/ABAC) tuned for aged-care workflows.</li>
+      <li><strong>Built-in MFA via Azure AD&nbsp;B2C</strong>—no extra apps for staff to juggle.</li>
+      <li><strong>Near-real-time Audit Trails</strong> feeding straight into Microsoft Sentinel for threat hunting.</li>
+      <li><strong>Least-Privilege Policy Engine</strong> that auto-expires temporary access.</li>
+    </ul>
+
+    <!-- Timeline or roadmap -->
+    <aside class="roadmap">
+      <h3>Roadmap at a Glance</h3>
+      <ol>
+        <li><strong>Prototype v1</strong> – Core RBAC, MFA, audit logging <em>(current)</em></li>
+        <li><strong>Pilot Study</strong> – Deploy into a partner aged-care facility and gather feedback</li>
+        <li><strong>v2 Hardening</strong> – Pen-testing, SOCI Act alignment, and SOC-2 control mapping</li>
+      </ol>
+    </aside>
+
+    <!-- Team blurb -->
+    <h3>Who We Are</h3>
+    <p>
+      A small team of cybersecurity students and industry mentors from Swinburne
+      University, Coles Group, and the AISA community, united by a drive to raise
+      the security baseline across one of Australia’s most vulnerable sectors.
+    </p>
+
+  </div><!-- /.container -->
 </section>
+
 <%- include('partials/footer') %>
